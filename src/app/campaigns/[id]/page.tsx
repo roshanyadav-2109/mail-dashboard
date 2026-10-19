@@ -107,10 +107,10 @@ export default async function Campaign({
               <tr>
                 <th>Email</th>
                 <th>Status</th>
-                <th className="num">Opens</th>
-                <th className="num">Clicks</th>
-                <th>Sent</th>
-                <th>Detail</th>
+                <th className="hide-sm num">Opens</th>
+                <th className="hide-sm num">Clicks</th>
+                <th className="hide-sm">Sent</th>
+                <th className="hide-sm">Detail</th>
               </tr>
             </thead>
             <tbody>
@@ -120,10 +120,10 @@ export default async function Campaign({
                   <td>
                     <span className={`badge ${m.status}`}>{m.status}</span>
                   </td>
-                  <td className="num">{m.opens}</td>
-                  <td className="num">{m.clicks}</td>
-                  <td>{m.sent_at ? new Date(m.sent_at).toLocaleString('en-IN') : '—'}</td>
-                  <td className="muted">{m.error ?? m.detail ?? ''}</td>
+                  <td className="hide-sm num">{m.opens}</td>
+                  <td className="hide-sm num">{m.clicks}</td>
+                  <td className="hide-sm">{m.sent_at ? new Date(m.sent_at).toLocaleString('en-IN') : '—'}</td>
+                  <td className="hide-sm muted">{m.error ?? m.detail ?? ''}</td>
                 </tr>
               ))}
             </tbody>

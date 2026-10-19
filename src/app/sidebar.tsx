@@ -32,6 +32,10 @@ export default function Sidebar({ email }: { email: string }) {
   const active = (href: string) => (href === '/' ? path === '/' : path === href || path.startsWith(`${href}/`))
 
   useEffect(() => {
+    document.body.classList.remove('nav-open')
+  }, [path])
+
+  useEffect(() => {
     try {
       document.body.classList.toggle('side-collapsed', localStorage.getItem(KEY) === '1')
     } catch {}

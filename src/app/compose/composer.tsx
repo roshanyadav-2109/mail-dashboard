@@ -37,6 +37,7 @@ export default function Composer({ initialGroup }: { initialGroup?: string }) {
   const [format, setFormat] = useState<'html' | 'text'>('html')
   const [device, setDevice] = useState<'desktop' | 'mobile'>('desktop')
   const [showPreview, setShowPreview] = useState(true)
+  const [pane, setPane] = useState<'edit' | 'preview'>('edit') // phones show one pane at a time
   const [drawer, setDrawer] = useState(false)
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState('')
@@ -169,7 +170,16 @@ export default function Composer({ initialGroup }: { initialGroup?: string }) {
         </button>
       </div>
 
-      <div className="c-body">
+      <div className="pane-switch" role="tablist" aria-label="Editor or preview">
+        <button type="button" role="tab" aria-selected={pane === 'edit'} className={`tab${pane === 'edit' ? ' on' : ''}`} onClick={() => setPane('edit')}>
+          Edit
+        </button>
+        <button type="button" role="tab" aria-selected={pane === 'preview'} className={`tab${pane === 'preview' ? ' on' : ''}`} onClick={() => setPane('preview')}>
+          Preview
+        </button>
+      </div>
+
+      <div className="c-body" data-pane={pane}>
         <section className="c-editor">
           <div className="tabbar" role="tablist" aria-label="Message format">
             <button type="button" role="tab" aria-selected={format === 'html'} className={`tab${format === 'html' ? ' on' : ''}`} onClick={() => setFormat('html')}>
@@ -190,8 +200,8 @@ export default function Composer({ initialGroup }: { initialGroup?: string }) {
           )}
         </section>
 
-        {showPreview && (
-          <section className="c-preview">
+        {(
+          <section className="c-preview" data-hide={showPreview ? '0' : '1'}>
             <div className="tabbar">
               <span style={{ fontWeight: 500 }}>Preview</span>
               <span className="spacer" style={{ flex: 1 }} />

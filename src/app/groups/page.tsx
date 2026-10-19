@@ -28,7 +28,7 @@ export default async function Groups({ searchParams }: { searchParams: Promise<{
               <tr>
                 <th>Group</th>
                 <th className="num">Members</th>
-                <th>Created</th>
+                <th className="hide-sm">Created</th>
                 <th />
               </tr>
             </thead>
@@ -42,7 +42,7 @@ export default async function Groups({ searchParams }: { searchParams: Promise<{
                     {g.description && <div className="muted">{g.description}</div>}
                   </td>
                   <td className="num">{g.emails.length}</td>
-                  <td>{new Date(g.created_at).toLocaleDateString('en-IN')}</td>
+                  <td className="hide-sm">{new Date(g.created_at).toLocaleDateString('en-IN')}</td>
                   <td style={{ textAlign: 'right' }}>
                     <Link className="btn ghost" href={`/compose?group=${g.id}`}>
                       Send email

@@ -58,8 +58,8 @@ export default async function Suppressions({ searchParams }: { searchParams: Pro
                 <tr>
                   <th>Email</th>
                   <th>Reason</th>
-                  <th>Detail</th>
-                  <th>Added</th>
+                  <th className="hide-sm">Detail</th>
+                  <th className="hide-sm">Added</th>
                   <th />
                 </tr>
               </thead>
@@ -70,8 +70,8 @@ export default async function Suppressions({ searchParams }: { searchParams: Pro
                     <td>
                       <span className={`badge ${r.reason === 'bounce' || r.reason === 'complaint' ? 'bounced' : ''}`}>{r.reason}</span>
                     </td>
-                    <td className="muted">{r.detail}</td>
-                    <td>{new Date(r.created_at).toLocaleString('en-IN')}</td>
+                    <td className="hide-sm muted">{r.detail}</td>
+                    <td className="hide-sm">{new Date(r.created_at).toLocaleString('en-IN')}</td>
                     <td style={{ textAlign: 'right' }}>
                       <form
                         action={async () => {

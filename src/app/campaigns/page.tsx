@@ -47,15 +47,15 @@ export default async function Campaigns() {
                 <tr>
                   <th>Subject</th>
                   <th>Date</th>
-                  <th>Sent by</th>
-                  <th className="num">Total</th>
+                  <th className="hide-sm">Sent by</th>
+                  <th className="hide-sm num">Total</th>
                   <th className="num">Delivered</th>
-                  <th className="num">Opened</th>
+                  <th className="hide-sm num">Opened</th>
                   <th className="num">Bounced</th>
-                  <th className="num">Complaints</th>
-                  <th className="num">Failed</th>
-                  <th className="num">Skipped</th>
-                  <th className="num">Pending</th>
+                  <th className="hide-sm num">Complaints</th>
+                  <th className="hide-sm num">Failed</th>
+                  <th className="hide-sm num">Skipped</th>
+                  <th className="hide-sm num">Pending</th>
                 </tr>
               </thead>
               <tbody>
@@ -67,15 +67,15 @@ export default async function Campaigns() {
                       </Link>
                     </td>
                     <td>{new Date(r.created_at).toLocaleString('en-IN')}</td>
-                    <td>{r.created_by}</td>
-                    <td className="num">{r.total}</td>
+                    <td className="hide-sm">{r.created_by}</td>
+                    <td className="hide-sm num">{r.total}</td>
                     <td className="num">{r.delivered}</td>
-                    <td className="num">{r.opened}</td>
+                    <td className="hide-sm num">{r.opened}</td>
                     <td className="num">{r.bounced}</td>
-                    <td className="num">{r.complained}</td>
-                    <td className="num">{r.failed}</td>
-                    <td className="num">{r.suppressed}</td>
-                    <td className="num">{r.pending}</td>
+                    <td className="hide-sm num">{r.complained}</td>
+                    <td className="hide-sm num">{r.failed}</td>
+                    <td className="hide-sm num">{r.suppressed}</td>
+                    <td className="hide-sm num">{r.pending}</td>
                   </tr>
                 ))}
               </tbody>

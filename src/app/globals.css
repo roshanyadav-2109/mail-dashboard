@@ -51,7 +51,7 @@ kbd { font: inherit; font-size: 12px; padding: 1px 7px; border: 1px solid var(--
 .search-btn { width: 100%; justify-content: flex-start; gap: 10px; height: 42px; padding: 0 12px; background: #fff; color: var(--muted); border: 1px solid var(--line-strong); border-radius: 9px; font-weight: 400 }
 .search-btn:hover { background: var(--bg); border-color: var(--line-strong) }
 .search-btn .nav-text:first-of-type { flex: 1; text-align: left }
-.side-nav { flex: 1; overflow-y: auto; padding: 8px 12px 16px }
+.side-nav { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 8px 12px 16px }
 .nav-label { padding: 22px 12px 8px; font-size: 14px; color: var(--muted) }
 .nav-item { display: flex; align-items: center; gap: 12px; height: 42px; padding: 0 12px; border-radius: 9px; color: var(--text); text-decoration: none; font-weight: 450; margin-bottom: 2px }
 .nav-item:hover { background: var(--hover) }
@@ -62,13 +62,6 @@ kbd { font: inherit; font-size: 12px; padding: 1px 7px; border: 1px solid var(--
 .icon-btn { background: transparent; color: var(--muted); border: 0; padding: 6px; border-radius: 6px }
 .icon-btn:hover { background: var(--hover); color: var(--text) }
 
-body.side-collapsed .sidebar { width: var(--side-w-collapsed) }
-body.side-collapsed .nav-text, body.side-collapsed .nav-label, body.side-collapsed .account-name, body.side-collapsed .account-chev { display: none }
-body.side-collapsed .account { padding: 0 19px }
-body.side-collapsed .side-search { padding: 14px 12px 6px }
-body.side-collapsed .search-btn { justify-content: center; padding: 0 }
-body.side-collapsed .nav-item { justify-content: center; padding: 0 }
-body.side-collapsed .side-foot { padding: 12px 0; text-align: center }
 
 .main { flex: 1; min-width: 0 }
 .topbar { height: 68px; border-bottom: 1px solid var(--line); background: var(--surface); display: flex; align-items: center; justify-content: flex-end; gap: 26px; padding: 0 32px; position: sticky; top: 0; z-index: 10 }
@@ -216,17 +209,6 @@ iframe { width: 100%; height: 380px; border: 1px solid var(--line); border-radiu
 .google-btn { width: 100%; padding: 11px 14px; background: #fff; color: var(--text); border-color: var(--line-strong); font-weight: 500 }
 .google-btn:hover { background: var(--hover); border-color: var(--line-strong) }
 
-@media (max-width: 900px) {
-  .shell { flex-direction: column }
-  .sidebar { width: 100% !important; height: auto; position: static; border-right: 0; border-bottom: 1px solid var(--line) }
-  .side-nav { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 12px }
-  .nav-label, .side-foot { display: none }
-  .topbar { position: static; padding: 0 16px }
-  .content { padding: 20px 16px 40px }
-  .grid, .home-cols { grid-template-columns: 1fr }
-  .kv { grid-template-columns: 1fr }
-  .hero { font-size: 28px }
-}
 
 /* ── Workspace: one main area + collapsible right panel ── */
 .workspace { display: flex; gap: 16px; align-items: flex-start }
@@ -270,11 +252,128 @@ iframe { width: 100%; height: 380px; border: 1px solid var(--line); border-radiu
 button.pill { color: var(--text-2); background: #fff; border: 1px solid var(--line-strong); padding: 4px 12px }
 button.pill:hover { background: var(--hover) }
 button.pill.on { background: var(--accent-soft); border-color: transparent; color: var(--accent) }
-@media (max-width: 1100px) {
-  .composer { height: auto }
-  .c-body { flex-direction: column }
-  .c-preview { width: auto; border-left: 0; border-top: 1px solid var(--line) }
-  .editor { min-height: 320px }
-  .workspace { flex-direction: column }
-  .ws-panel { width: 100%; position: static; max-height: none }
+
+/* ── Sidebar collapsed to icons: by the toggle on laptops/desktops, automatically on small laptops ── */
+@media (min-width: 901px) {
+  body.side-collapsed .sidebar { width: var(--side-w-collapsed) }
+  body.side-collapsed .nav-text, body.side-collapsed .nav-label, body.side-collapsed .account-name, body.side-collapsed .account-chev { display: none }
+  body.side-collapsed .account { padding: 0 19px }
+  body.side-collapsed .side-search { padding: 14px 12px 6px }
+  body.side-collapsed .search-btn { justify-content: center; padding: 0 }
+  body.side-collapsed .nav-item { justify-content: center; padding: 0 }
+  body.side-collapsed .side-foot { padding: 12px 0; text-align: center }
+}
+@media (min-width: 901px) and (max-width: 1100px) {
+  .sidebar { width: var(--side-w-collapsed) }
+  .nav-text, .nav-label, .account-name, .account-chev { display: none }
+  .account { padding: 0 19px }
+  .side-search { padding: 14px 12px 6px }
+  .search-btn { justify-content: center; padding: 0 }
+  .nav-item { justify-content: center; padding: 0 }
+  .side-foot { padding: 12px 0; text-align: center }
+}
+
+/* ── Phone-only parts are hidden by default (desktop / laptop) ── */
+.nav-toggle, .topbar-title, .bottom-nav, .nav-backdrop, .pane-switch { display: none }
+.c-preview[data-hide='1'] { display: none }
+
+/* ── Laptops 901–1280px: tighter content, composer keeps three panes ── */
+@media (min-width: 901px) and (max-width: 1280px) {
+  .content { padding: 24px 24px 56px }
+  .c-preview { width: 40%; min-width: 300px }
+  .ws-panel { width: 320px }
+  .home-cols { gap: 20px }
+}
+
+/* ── Phones & small tablets (≤900px): app-style layout ── */
+@media (max-width: 900px) {
+  input, textarea, select { font-size: 16px } /* stops iOS zooming into fields */
+  .shell { display: block }
+  .main { min-height: 100vh }
+
+  /* Navigation becomes an off-canvas drawer opened by the hamburger or "More" */
+  .sidebar { position: fixed; left: 0; top: 0; bottom: 0; width: 288px; max-width: 86vw; height: 100dvh; z-index: 60; transform: translateX(-102%); transition: transform .2s ease, box-shadow .2s ease; box-shadow: none }
+  body.nav-open .sidebar { transform: none; box-shadow: 8px 0 32px rgba(0, 0, 0, .18) }
+  .side-foot, .search-btn kbd { display: none }
+  .nav-backdrop { position: fixed; inset: 0; background: rgba(15, 15, 15, .4); z-index: 55 }
+  body.nav-open .nav-backdrop { display: block }
+  body.nav-open { overflow: hidden }
+  .nav-item { height: 46px }
+
+  .topbar { height: 56px; padding: 0 8px 0 4px; gap: 6px; justify-content: flex-start }
+  .nav-toggle { display: inline-flex; padding: 10px }
+  .topbar-title { display: block; font-weight: 600; font-size: 16px }
+  .top-link-text { display: none }
+  .top-link { padding: 10px }
+  .user-menu summary { width: 40px; height: 40px }
+
+  .content { padding: 16px 14px calc(84px + env(safe-area-inset-bottom)) }
+  .page-head { flex-direction: column; align-items: stretch; gap: 12px; margin-bottom: 16px }
+  .page-head h1 { font-size: 21px }
+  .page-head .row { width: 100% }
+  .page-head .row > * { flex: 1 }
+
+  /* Bottom tab bar */
+  .bottom-nav { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; background: #fff; border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom) }
+  .bn-item { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; height: 62px; padding: 0; font-size: 11px; font-weight: 500; color: var(--muted); text-decoration: none; background: transparent; border: 0; border-radius: 0 }
+  .bn-item:hover { background: transparent; color: var(--text) }
+  .bn-item.on { color: var(--accent) }
+
+  /* Home */
+  .pill-banner { font-size: 13px; padding: 8px 14px; max-width: 100% }
+  .hero { font-size: 26px; margin: 22px 0 16px }
+  .hero-search button { height: 48px; font-size: 15px }
+  .kbds { display: none }
+  .home-cols { grid-template-columns: 1fr; gap: 22px; margin-top: 28px }
+  .kpis { grid-template-columns: 1fr 1fr; gap: 10px }
+  .kpi { padding: 12px 14px }
+  .kpi .value { font-size: 22px }
+  .banner { flex-direction: column }
+  .banner-art { width: 100%; height: 64px }
+  .banner-body { padding: 14px }
+  .banner .banner-btn { width: 100% }
+
+  /* Tables: drop secondary columns, keep touch-sized rows */
+  .hide-sm { display: none }
+  th, td { padding: 12px 12px }
+  .card-head { flex-wrap: wrap; padding: 12px 14px }
+  .card-head .row, .card-head form { width: 100% }
+  .card-head input { flex: 1; width: auto !important; min-width: 0 }
+  .stats { grid-template-columns: repeat(3, 1fr) }
+  .stat { border-bottom: 1px solid var(--line) }
+  .kv { grid-template-columns: 1fr; gap: 0 }
+  .kv > div:nth-child(odd) { padding-bottom: 0; border-bottom: 0 }
+  .grid { grid-template-columns: 1fr }
+  button, .btn { min-height: 40px }
+
+  /* Side panels become full-screen sheets */
+  .workspace { display: block }
+  .ws-panel { position: fixed; inset: 0; width: auto; max-height: none; border: 0; border-radius: 0; z-index: 70 }
+  .ws-panel-head { padding: 14px 16px }
+
+  /* Compose: one pane at a time (Edit / Preview), controls stacked */
+  .composer { height: calc(100dvh - 56px - 62px - 28px - env(safe-area-inset-bottom)); min-height: 480px; margin-bottom: 0 }
+  .c-top { flex-wrap: wrap; padding: 10px 12px }
+  .subject { flex: 1 1 100%; font-size: 17px }
+  .c-top > button { flex: 1 }
+  .c-to { padding: 8px 12px; flex-wrap: wrap }
+  .c-to > button { width: 100% }
+  .pane-switch { display: flex; border-bottom: 1px solid var(--line); padding: 0 12px }
+  .pane-switch .tab { flex: 1; padding: 12px 10px 10px }
+  .c-body[data-pane='edit'] .c-preview { display: none }
+  .c-body[data-pane='preview'] .c-editor { display: none }
+  .c-body[data-pane='preview'] .c-preview[data-hide='1'] { display: flex }
+  .c-preview { width: auto; min-width: 0; flex: 1; border-left: 0 }
+  .c-editor .tabbar button.icon-btn { display: none }
+  .editor { padding: 14px }
+  .drawer { width: 100%; box-shadow: none }
+  .preview-stage { padding: 10px }
+
+  .palette-back { padding-top: 6vh }
+  .login { padding: 28px 20px }
+}
+
+@media (max-width: 380px) {
+  .kpis { grid-template-columns: 1fr }
+  .stats { grid-template-columns: repeat(2, 1fr) }
 }
