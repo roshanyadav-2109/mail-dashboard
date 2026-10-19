@@ -72,8 +72,8 @@ export default async function Campaign({
     <>
       <PageHead
         title={campaign.subject}
-        description={`${campaign.format === 'text' ? 'Plain text' : 'HTML'} email · sent by ${campaign.created_by} on ${new Date(campaign.created_at).toLocaleString('en-IN')}`}
-        crumbs={[{ href: '/', name: 'Account home' }, { href: '/campaigns', name: 'Campaigns' }, { name: 'Details' }]}
+        description={`${campaign.format === 'text' ? 'Plain text' : 'HTML'} · sent by ${campaign.created_by} on ${new Date(campaign.created_at).toLocaleString('en-IN')}`}
+        back={{ href: '/campaigns', name: 'Campaigns' }}
         actions={<Runner id={id} pending={pending} failed={counts.failed ?? 0} autostart={run === '1'} />}
       />
 
@@ -99,7 +99,6 @@ export default async function Campaign({
               </Link>
             ))}
           </div>
-          <span className="muted">Open counts need open tracking and are approximate</span>
         </div>
 
         <div className="scroll">

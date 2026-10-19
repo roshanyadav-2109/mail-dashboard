@@ -22,8 +22,6 @@ export default async function Settings() {
     <>
       <PageHead
         title="Settings"
-        description="Read-only configuration. Change these in the Vercel project's environment variables."
-        crumbs={[{ href: '/', name: 'Account home' }, { name: 'Settings' }]}
       />
 
       {/* One card, three titled sections. */}

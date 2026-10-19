@@ -178,9 +178,6 @@ export default function Composer({ initialGroup }: { initialGroup?: string }) {
             <button type="button" role="tab" aria-selected={format === 'text'} className={`tab${format === 'text' ? ' on' : ''}`} onClick={() => setFormat('text')}>
               Plain text
             </button>
-            <span className="muted" style={{ marginLeft: 8 }}>
-              {format === 'html' ? 'Your own markup' : 'Text only, no formatting'} · unsubscribe link added automatically
-            </span>
             <span className="spacer" style={{ flex: 1 }} />
             <button type="button" className="icon-btn" onClick={() => setShowPreview((s) => !s)} aria-pressed={showPreview} title={showPreview ? 'Hide preview' : 'Show preview'}>
               <Icon name="panel" />
@@ -302,7 +299,6 @@ export default function Composer({ initialGroup }: { initialGroup?: string }) {
                     </span>
                   ))}
                 </div>
-                <p className="muted">Unsubscribed, bounced and complaining addresses are skipped automatically.</p>
               </div>
             </div>
           </aside>

@@ -61,10 +61,11 @@ function Row({ href, icon, children }: { href: string; icon: 'campaigns' | 'user
 export default async function Home() {
   await requireUser()
   const sb = db()
-  const [{ data: c }, { data: l }, { data: e }] = await Promise.all([
+  const [{ data: c }, { data: l }, { data: e }, { count: blockedCount }] = await Promise.all([
     sb.from('campaign_stats').select('*').order('created_at', { ascending: false }).limit(200),
     sb.from('groups').select('id, name, emails').order('created_at', { ascending: false }).limit(3),
     sb.from('ses_events').select('id, event_type, email, created_at').order('id', { ascending: false }).limit(5),
+    sb.from('suppressions').select('email', { count: 'exact', head: true }),
   ])
   const campaigns = (c ?? []) as Campaign[]
   const groups = (l ?? []) as Group[]
@@ -136,10 +137,7 @@ export default async function Home() {
       <div className="banner">
         <div className="banner-art" />
         <div className="banner-body">
-          <div>
-            <h3>Bounce and complaint protection is on</h3>
-            <p>Hard bounces, spam complaints and unsubscribes are suppressed automatically so you never email them again.</p>
-          </div>
+          <h3>{blockedCount ?? 0} suppressed address{blockedCount === 1 ? '' : 'es'}</h3>
           <Link className="btn banner-btn" href="/suppressions">
             View suppressions
           </Link>

@@ -152,9 +152,6 @@ export default async function GroupDetail({
         }}
       >
         <div className="panel-label">Delete group</div>
-        <p className="muted" style={{ marginTop: 0 }}>
-          Removes the group only. Its people and past campaigns are not affected.
-        </p>
         <button className="danger" type="submit">
           Delete group
         </button>
@@ -165,8 +162,8 @@ export default async function GroupDetail({
   return (
     <PanelLayout
       title={group.name}
-        description={group.description || 'No description'}
-        crumbs={[{ href: '/', name: 'Account home' }, { href: '/groups', name: 'Groups' }, { name: group.name }]}
+        description={group.description || undefined}
+        back={{ href: '/groups', name: 'Groups' }}
         actions={
           <Link className="btn" href={`/compose?group=${id}`}>
             Send email to this group

@@ -96,8 +96,6 @@ export default async function Groups({ searchParams }: { searchParams: Promise<{
   return (
     <PanelLayout
       title="Groups"
-      description="Organise recipients into named groups, then send a campaign to one or more of them."
-      crumbs={[{ href: '/', name: 'Account home' }, { name: 'Groups' }]}
       main={table}
       panel={form}
       panelLabel="New group"

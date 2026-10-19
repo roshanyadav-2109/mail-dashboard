@@ -12,7 +12,7 @@ import PageHead from './page-head'
 export default function PanelLayout({
   title,
   description,
-  crumbs,
+  back,
   actions,
   main,
   panel,
@@ -22,7 +22,7 @@ export default function PanelLayout({
 }: {
   title: string
   description?: string
-  crumbs?: { href?: string; name: string }[]
+  back?: { href: string; name: string }
   actions?: React.ReactNode
   main: React.ReactNode
   panel: React.ReactNode
@@ -37,7 +37,7 @@ export default function PanelLayout({
       <PageHead
         title={title}
         description={description}
-        crumbs={crumbs}
+        back={back}
         actions={
           <>
             <button type="button" className="ghost" onClick={() => setOpen((o) => !o)} aria-expanded={open}>

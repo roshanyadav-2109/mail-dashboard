@@ -25,10 +25,7 @@ export default async function Login({ searchParams }: { searchParams: Promise<{ 
             <path d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM22 6l-10 7L2 6" />
           </svg>
         </div>
-        <h1>Mail Dashboard</h1>
-        <p className="muted" style={{ marginBottom: 22 }}>
-          Sign in with your authorised Google account to continue.
-        </p>
+        <h1 style={{ marginBottom: 22 }}>Mail Dashboard</h1>
         {error && (
           <div className="notice" style={{ marginBottom: 16, textAlign: 'left' }}>
             This Google account is not authorised to use this dashboard.
@@ -38,9 +35,6 @@ export default async function Login({ searchParams }: { searchParams: Promise<{ 
           <GoogleMark />
           Continue with Google
         </button>
-        <p className="muted" style={{ marginTop: 18, marginBottom: 0 }}>
-          Access is limited to approved administrators.
-        </p>
       </form>
     </div>
   )

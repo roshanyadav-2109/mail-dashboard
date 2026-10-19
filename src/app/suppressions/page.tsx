@@ -22,13 +22,11 @@ export default async function Suppressions({ searchParams }: { searchParams: Pro
     <>
       <PageHead
         title="Suppressions"
-        description="Addresses that are never emailed. Bounces, complaints and unsubscribes are added automatically."
-        crumbs={[{ href: '/', name: 'Overview' }, { name: 'Suppressions' }]}
       />
 
       <div className="card">
         <div className="card-head">
-          <h2>Suppression list ({rows.length})</h2>
+          <h2>{rows.length} address{rows.length === 1 ? '' : 'es'}</h2>
           <div className="row">
             <form className="row">
               <input name="q" defaultValue={q} placeholder="Search address" style={{ width: 200 }} />

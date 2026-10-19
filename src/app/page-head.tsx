@@ -4,26 +4,21 @@ import Link from 'next/link'
 export default function PageHead({
   title,
   description,
-  crumbs,
+  back,
   actions,
 }: {
   title: string
   description?: string
-  crumbs?: { href?: string; name: string }[]
+  back?: { href: string; name: string }
   actions?: React.ReactNode
 }) {
   return (
     <div className="page-head">
       <div>
-        {crumbs && (
-          <div className="crumbs">
-            {crumbs.map((c, i) => (
-              <span key={c.name}>
-                {i > 0 && ' / '}
-                {c.href ? <Link href={c.href}>{c.name}</Link> : c.name}
-              </span>
-            ))}
-          </div>
+        {back && (
+          <Link className="back" href={back.href}>
+            ← {back.name}
+          </Link>
         )}
         <h1>{title}</h1>
         {description && <p>{description}</p>}

@@ -31,8 +31,6 @@ export default async function Campaigns() {
     <>
       <PageHead
         title="Campaigns"
-        description="Every email you have sent, with delivery results."
-        crumbs={[{ href: '/', name: 'Overview' }, { name: 'Campaigns' }]}
         actions={
           <Link className="btn" href="/compose">
             New campaign
