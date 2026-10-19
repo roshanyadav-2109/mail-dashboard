@@ -3,6 +3,8 @@ import Link from 'next/link'
 import { db } from '@/lib/db'
 import { requireUser } from '@/lib/guard'
 
+import PageHead from '../page-head'
+
 export const dynamic = 'force-dynamic'
 
 type Row = {
@@ -26,52 +28,63 @@ export default async function Campaigns() {
   const rows = (data ?? []) as Row[]
 
   return (
-    <main>
-      <div className="card scroll">
-        <h2>Campaign history</h2>
+    <>
+      <PageHead
+        title="Campaigns"
+        description="Every email you have sent, with delivery results."
+        crumbs={[{ href: '/', name: 'Overview' }, { name: 'Campaigns' }]}
+        actions={
+          <Link className="btn" href="/compose">
+            New campaign
+          </Link>
+        }
+      />
+      <div className="card">
         {rows.length === 0 ? (
-          <p className="muted">Nothing sent yet.</p>
+          <div className="empty">Nothing sent yet.</div>
         ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Subject</th>
-                <th>Date</th>
-                <th>By</th>
-                <th>Total</th>
-                <th>Delivered</th>
-                <th>Opened</th>
-                <th>Bounced</th>
-                <th>Complaints</th>
-                <th>Failed</th>
-                <th>Skipped</th>
-                <th>Pending</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={r.id}>
-                  <td>
-                    <Link className="link" href={`/campaigns/${r.id}`}>
-                      {r.subject}
-                    </Link>
-                  </td>
-                  <td>{new Date(r.created_at).toLocaleString('en-IN')}</td>
-                  <td>{r.created_by}</td>
-                  <td>{r.total}</td>
-                  <td>{r.delivered}</td>
-                  <td>{r.opened}</td>
-                  <td>{r.bounced}</td>
-                  <td>{r.complained}</td>
-                  <td>{r.failed}</td>
-                  <td>{r.suppressed}</td>
-                  <td>{r.pending}</td>
+          <div className="scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Subject</th>
+                  <th>Date</th>
+                  <th>Sent by</th>
+                  <th className="num">Total</th>
+                  <th className="num">Delivered</th>
+                  <th className="num">Opened</th>
+                  <th className="num">Bounced</th>
+                  <th className="num">Complaints</th>
+                  <th className="num">Failed</th>
+                  <th className="num">Skipped</th>
+                  <th className="num">Pending</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.id}>
+                    <td>
+                      <Link className="link" href={`/campaigns/${r.id}`}>
+                        {r.subject}
+                      </Link>
+                    </td>
+                    <td>{new Date(r.created_at).toLocaleString('en-IN')}</td>
+                    <td>{r.created_by}</td>
+                    <td className="num">{r.total}</td>
+                    <td className="num">{r.delivered}</td>
+                    <td className="num">{r.opened}</td>
+                    <td className="num">{r.bounced}</td>
+                    <td className="num">{r.complained}</td>
+                    <td className="num">{r.failed}</td>
+                    <td className="num">{r.suppressed}</td>
+                    <td className="num">{r.pending}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
-    </main>
+    </>
   )
 }

@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation'
 import { db } from '@/lib/db'
 import { requireUser } from '@/lib/guard'
 
+import PageHead from '../../page-head'
 import Runner from './runner'
 
 export const dynamic = 'force-dynamic'
@@ -54,73 +55,90 @@ export default async function Campaign({
   if (status && STATUSES.includes(status)) query = query.eq('status', status)
   const { data: messages } = await query
 
+  const tiles: [string, number][] = [
+    ['Total', total],
+    ['Delivered', counts.delivered ?? 0],
+    ['Awaiting result', counts.sent ?? 0],
+    ['Opened', opened],
+    ['Clicked', clicked],
+    ['Bounced', counts.bounced ?? 0],
+    ['Complaints', counts.complained ?? 0],
+    ['Failed', counts.failed ?? 0],
+    ['Skipped', counts.suppressed ?? 0],
+    ['Pending', pending],
+  ]
+
   return (
-    <main>
-      <p>
-        <Link className="link" href="/campaigns">
-          ← History
-        </Link>
-      </p>
+    <>
+      <PageHead
+        title={campaign.subject}
+        description={`Sent by ${campaign.created_by} on ${new Date(campaign.created_at).toLocaleString('en-IN')}`}
+        crumbs={[{ href: '/', name: 'Overview' }, { href: '/campaigns', name: 'Campaigns' }, { name: 'Details' }]}
+      />
+
       <div className="card">
-        <h2>{campaign.subject}</h2>
-        <p className="muted">
-          Sent by {campaign.created_by} on {new Date(campaign.created_at).toLocaleString('en-IN')}
-        </p>
-        <div className="stats">
-          <div className="stat"><b>{total}</b>Total</div>
-          <div className="stat"><b>{counts.delivered ?? 0}</b>Delivered</div>
-          <div className="stat"><b>{counts.sent ?? 0}</b>Sent (awaiting result)</div>
-          <div className="stat"><b>{opened}</b>Opened</div>
-          <div className="stat"><b>{clicked}</b>Clicked</div>
-          <div className="stat"><b>{counts.bounced ?? 0}</b>Bounced</div>
-          <div className="stat"><b>{counts.complained ?? 0}</b>Complaints</div>
-          <div className="stat"><b>{counts.failed ?? 0}</b>Failed</div>
-          <div className="stat"><b>{counts.suppressed ?? 0}</b>Skipped (suppressed)</div>
-          <div className="stat"><b>{pending}</b>Pending</div>
+        <div className="card-head">
+          <h2>Delivery summary</h2>
+          <Runner id={id} pending={pending} failed={counts.failed ?? 0} autostart={run === '1'} />
         </div>
-        <Runner id={id} pending={pending} failed={counts.failed ?? 0} autostart={run === '1'} />
-        <p className="muted">Open counts need open tracking enabled on the SES configuration set and are approximate.</p>
+        <div className="card-body">
+          <div className="stats" style={{ margin: 0 }}>
+            {tiles.map(([label, value]) => (
+              <div className="stat" key={label}>
+                <b>{value}</b>
+                <span>{label}</span>
+              </div>
+            ))}
+          </div>
+          <p className="muted" style={{ marginBottom: 0 }}>
+            Open counts need open tracking on the SES configuration set and are approximate. Skipped = suppressed addresses.
+          </p>
+        </div>
       </div>
 
-      <div className="card scroll" style={{ marginTop: 16 }}>
-        <div className="row" style={{ marginBottom: 10 }}>
-          <h2 style={{ margin: 0 }}>Recipients</h2>
-          <Link className="link" href={`/campaigns/${id}`}>
-            all
-          </Link>
-          {STATUSES.filter((s) => counts[s]).map((s) => (
-            <Link key={s} className="link" href={`/campaigns/${id}?status=${s}`}>
-              {s} ({counts[s]})
+      <div className="card" style={{ marginTop: 16 }}>
+        <div className="card-head">
+          <h2>Recipients</h2>
+          <div className="pills">
+            <Link className={`pill${!status ? ' on' : ''}`} href={`/campaigns/${id}`}>
+              All ({total})
             </Link>
-          ))}
-        </div>
-        <table>
-          <thead>
-            <tr>
-              <th>Email</th>
-              <th>Status</th>
-              <th>Opens</th>
-              <th>Clicks</th>
-              <th>Sent</th>
-              <th>Detail</th>
-            </tr>
-          </thead>
-          <tbody>
-            {((messages ?? []) as Message[]).map((m) => (
-              <tr key={m.id}>
-                <td>{m.email}</td>
-                <td>
-                  <span className={`badge ${m.status}`}>{m.status}</span>
-                </td>
-                <td>{m.opens}</td>
-                <td>{m.clicks}</td>
-                <td>{m.sent_at ? new Date(m.sent_at).toLocaleString('en-IN') : '—'}</td>
-                <td className="muted">{m.error ?? m.detail ?? ''}</td>
-              </tr>
+            {STATUSES.filter((s) => counts[s]).map((s) => (
+              <Link key={s} className={`pill${status === s ? ' on' : ''}`} href={`/campaigns/${id}?status=${s}`}>
+                {s} ({counts[s]})
+              </Link>
             ))}
-          </tbody>
-        </table>
+          </div>
+        </div>
+        <div className="scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Email</th>
+                <th>Status</th>
+                <th className="num">Opens</th>
+                <th className="num">Clicks</th>
+                <th>Sent</th>
+                <th>Detail</th>
+              </tr>
+            </thead>
+            <tbody>
+              {((messages ?? []) as Message[]).map((m) => (
+                <tr key={m.id}>
+                  <td>{m.email}</td>
+                  <td>
+                    <span className={`badge ${m.status}`}>{m.status}</span>
+                  </td>
+                  <td className="num">{m.opens}</td>
+                  <td className="num">{m.clicks}</td>
+                  <td>{m.sent_at ? new Date(m.sent_at).toLocaleString('en-IN') : '—'}</td>
+                  <td className="muted">{m.error ?? m.detail ?? ''}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
-    </main>
+    </>
   )
 }
