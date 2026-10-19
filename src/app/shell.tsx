@@ -1,4 +1,5 @@
 import { signOut } from '@/auth'
+import type { Role } from '@/lib/roles'
 
 import Icon from './icons'
 import { BottomNav, NavBackdrop, NavToggle } from './nav-controls'
@@ -6,10 +7,10 @@ import Palette from './palette'
 import Sidebar from './sidebar'
 
 /** The signed-in frame: sidebar (a drawer on phones), top bar, content area, phone tab bar and quick search. */
-export default function Shell({ email, children }: { email: string; children: React.ReactNode }) {
+export default function Shell({ email, role, children }: { email: string; role: Role; children: React.ReactNode }) {
   return (
     <div className="shell">
-      <Sidebar email={email} />
+      <Sidebar email={email} role={role} />
       <NavBackdrop />
       <div className="main">
         <header className="topbar">
@@ -26,7 +27,7 @@ export default function Shell({ email, children }: { email: string; children: Re
             </summary>
             <div className="menu">
               <div className="menu-head">
-                <div className="muted">Signed in as</div>
+                <div className="muted">Signed in as · {role}</div>
                 <div style={{ fontWeight: 500, wordBreak: 'break-all' }}>{email}</div>
               </div>
               <form
@@ -45,7 +46,7 @@ export default function Shell({ email, children }: { email: string; children: Re
         <div className="content">{children}</div>
       </div>
       <BottomNav />
-      <Palette />
+      <Palette role={role} />
     </div>
   )
 }

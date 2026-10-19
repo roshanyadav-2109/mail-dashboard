@@ -1,9 +1,16 @@
+import { revalidatePath } from 'next/cache'
+
 import { db } from '@/lib/db'
-import { requireUser } from '@/lib/guard'
+import { parseEmails } from '@/lib/emails'
+import { requireRole } from '@/lib/guard'
+import { atLeast } from '@/lib/roles'
+import { getSettings, saveSettings } from '@/lib/settings'
 
 import PageHead from '../page-head'
 
 export const dynamic = 'force-dynamic'
+
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 const Status = ({ ok, children }: { ok: boolean; children: React.ReactNode }) => (
   <span>
@@ -12,29 +19,84 @@ const Status = ({ ok, children }: { ok: boolean; children: React.ReactNode }) =>
   </span>
 )
 
-export default async function Settings() {
-  const me = await requireUser()
+export default async function Settings({ searchParams }: { searchParams: Promise<{ saved?: string }> }) {
+  const me = await requireRole('viewer')
+  const { saved } = await searchParams
+  const canEdit = atLeast(me.role, 'admin')
+  const s = await getSettings()
   const { data: last } = await db().from('ses_events').select('created_at, event_type').order('created_at', { ascending: false }).limit(1)
-  const allowedUsers = (process.env.ALLOWED_EMAILS ?? '').split(',').map((e) => e.trim()).filter(Boolean)
   const lastEvent = last?.[0] as { created_at: string; event_type: string } | undefined
+  const address = (process.env.SES_FROM ?? '').match(/<([^>]+)>/)?.[1] ?? process.env.SES_FROM ?? ''
 
   return (
     <>
-      <PageHead
-        title="Settings"
-      />
+      <PageHead title="Settings" />
+      {saved && <div className="notice good-notice" style={{ marginBottom: 14 }}>Settings saved.</div>}
 
-      {/* One card, three titled sections. */}
-      <div className="card">
+      <form
+        className="card"
+        action={async (form) => {
+          'use server'
+          const actor = await requireRole('admin')
+          const replyTo = String(form.get('reply_to') ?? '').trim().toLowerCase()
+          const daily = Math.max(1, Math.min(50000, Number(form.get('daily_limit')) || 1))
+          const threshold = Math.max(1, Number(form.get('approval_threshold')) || 1)
+          await saveSettings(
+            {
+              sender_name: String(form.get('sender_name') ?? '').trim().slice(0, 80) || 'Unknown IITians',
+              reply_to: EMAIL.test(replyTo) ? replyTo : '',
+              daily_limit: daily,
+              approval_enabled: form.get('approval_enabled') === 'on',
+              approval_threshold: threshold,
+              test_recipients: parseEmails(String(form.get('test_recipients') ?? '')).slice(0, 10),
+            },
+            actor.email,
+          )
+          revalidatePath('/settings')
+          const { redirect } = await import('next/navigation')
+          redirect('/settings?saved=1')
+        }}
+      >
         <div className="card-head">
           <h2>Sending</h2>
+          {canEdit && <button type="submit">Save changes</button>}
+        </div>
+        <fieldset disabled={!canEdit} className="card-body settings-grid">
+          <label>
+            Sender name
+            <input name="sender_name" defaultValue={s.sender_name} />
+          </label>
+          <label>
+            Sender address
+            <input value={address} readOnly aria-readonly title="Fixed to unknowniitians.in" />
+          </label>
+          <label>
+            Default reply-to
+            <input name="reply_to" type="email" defaultValue={s.reply_to} placeholder="Replies go to the sender address" />
+          </label>
+          <label>
+            Daily send limit
+            <input name="daily_limit" type="number" min={1} max={50000} defaultValue={s.daily_limit} />
+          </label>
+          <label className="check">
+            <input name="approval_enabled" type="checkbox" defaultChecked={s.approval_enabled} />
+            Large sends need a second admin&apos;s approval
+          </label>
+          <label>
+            Approval needed above (recipients)
+            <input name="approval_threshold" type="number" min={1} defaultValue={s.approval_threshold} />
+          </label>
+          <label className="span-all">
+            Default test recipients
+            <input name="test_recipients" defaultValue={s.test_recipients.join(', ')} placeholder="Comma-separated, up to 10" />
+          </label>
+        </fieldset>
+
+        <div className="card-head" style={{ borderTop: '1px solid var(--line)' }}>
+          <h2>System</h2>
         </div>
         <div className="card-body">
           <div className="kv">
-            <div className="k">Sender address</div>
-            <div>{process.env.SES_FROM || '—'}</div>
-            <div className="k">Allowed sender domain</div>
-            <div>unknowniitians.in — the app refuses any other</div>
             <div className="k">AWS region</div>
             <div>{process.env.AWS_REGION ?? '—'}</div>
             <div className="k">Configuration set</div>
@@ -45,53 +107,17 @@ export default async function Settings() {
                 {process.env.AWS_ACCESS_KEY_ID ? 'Configured' : 'Missing'}
               </Status>
             </div>
-          </div>
-        </div>
-
-        <div className="card-head" style={{ borderTop: '1px solid var(--line)' }}>
-          <h2>Delivery tracking</h2>
-        </div>
-        <div className="card-body">
-          <div className="kv">
-            <div className="k">Webhook endpoint</div>
-            <div>{(process.env.APP_URL ?? '') + '/api/ses/events'}</div>
-            <div className="k">SNS topic</div>
-            <div style={{ wordBreak: 'break-all' }}>{process.env.SNS_TOPIC_ARN || '—'}</div>
-            <div className="k">Last event received</div>
+            <div className="k">Last delivery event</div>
             <div>
-              <Status ok={!!lastEvent}>{lastEvent ? `${lastEvent.event_type} at ${new Date(lastEvent.created_at).toLocaleString('en-IN')}` : 'None yet'}</Status>
+              <Status ok={!!lastEvent}>{lastEvent ? `${lastEvent.event_type} · ${new Date(lastEvent.created_at).toLocaleString('en-IN')}` : 'None yet'}</Status>
             </div>
-            <div className="k">Unsubscribe links</div>
+            <div className="k">Scheduled sending</div>
             <div>
-              <Status ok={!!process.env.APP_URL}>{process.env.APP_URL ? 'Enabled' : 'APP_URL is not set'}</Status>
+              <Status ok={!!process.env.CRON_SECRET}>{process.env.CRON_SECRET ? 'Enabled' : 'CRON_SECRET is not set'}</Status>
             </div>
           </div>
         </div>
-
-        <div className="card-head" style={{ borderTop: '1px solid var(--line)' }}>
-          <h2>Access ({allowedUsers.length})</h2>
-        </div>
-        <div className="scroll">
-          <table>
-            <thead>
-              <tr>
-                <th>Google account</th>
-                <th>Role</th>
-              </tr>
-            </thead>
-            <tbody>
-              {allowedUsers.map((u) => (
-                <tr key={u}>
-                  <td>
-                    {u} {u.toLowerCase() === me.toLowerCase() && <span className="badge sent">you</span>}
-                  </td>
-                  <td>Administrator</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      </form>
     </>
   )
 }

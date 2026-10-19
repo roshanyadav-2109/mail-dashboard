@@ -2,6 +2,7 @@ import Link from 'next/link'
 
 import { db } from '@/lib/db'
 import { requireUser } from '@/lib/guard'
+import { LEVEL_LABEL, senderHealth } from '@/lib/health'
 
 import Icon from './icons'
 import SearchTrigger from './search-trigger'
@@ -14,12 +15,13 @@ type Campaign = {
   created_at: string
   total: number
   sent: number
+  status: string
   delivered: number
   bounced: number
   complained: number
   pending: number
 }
-type Group = { id: string; name: string; emails: string[] }
+type Group = { id: string; name: string; group_members: { count: number }[] }
 type Event = { id: number; event_type: string; email: string | null; created_at: string }
 
 const pct = (n: number, d: number) => (d ? `${((n / d) * 100).toFixed(1)}%` : '—')
@@ -58,14 +60,17 @@ function Row({ href, icon, children }: { href: string; icon: 'campaigns' | 'user
   )
 }
 
-export default async function Home() {
+export default async function Home({ searchParams }: { searchParams: Promise<{ denied?: string }> }) {
   await requireUser()
+  const { denied } = await searchParams
   const sb = db()
-  const [{ data: c }, { data: l }, { data: e }, { count: blockedCount }] = await Promise.all([
+  const [{ data: c }, { data: l }, { data: e }, { count: blockedCount }, health, { data: waiting }] = await Promise.all([
     sb.from('campaign_stats').select('*').order('created_at', { ascending: false }).limit(200),
-    sb.from('groups').select('id, name, emails').order('created_at', { ascending: false }).limit(3),
+    sb.from('groups').select('id, name, group_members(count)').order('created_at', { ascending: false }).limit(3),
     sb.from('ses_events').select('id, event_type, email, created_at').order('id', { ascending: false }).limit(5),
     sb.from('suppressions').select('email', { count: 'exact', head: true }),
+    senderHealth(30),
+    sb.from('campaigns').select('id, subject, status, scheduled_at').in('status', ['pending_approval', 'scheduled']).order('scheduled_at'),
   ])
   const campaigns = (c ?? []) as Campaign[]
   const groups = (l ?? []) as Group[]
@@ -76,6 +81,24 @@ export default async function Home() {
 
   return (
     <div className="home">
+      {denied && <div className="notice" style={{ marginBottom: 16 }}>Your role doesn&apos;t have access to that page.</div>}
+      {health.level !== 'good' && (
+        <Link className={`health-banner h-${health.level}`} href="/analytics">
+          <strong>Sender health: {LEVEL_LABEL[health.level]}</strong>
+          <span>
+            Bounces {(health.bounceRate * 100).toFixed(1)}% · complaints {(health.complaintRate * 100).toFixed(2)}% over 30 days. Clean your lists before the next send.
+          </span>
+        </Link>
+      )}
+      {(waiting ?? []).map((w: { id: string; subject: string; status: string; scheduled_at: string | null }) => (
+        <Link key={w.id} className="health-banner h-warning" href={`/campaigns/${w.id}`}>
+          <strong>{w.status === 'pending_approval' ? 'Awaiting approval' : 'Scheduled'}</strong>
+          <span>
+            {w.subject || '(no subject)'}
+            {w.status === 'scheduled' && w.scheduled_at ? ` · ${new Date(w.scheduled_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}` : ''}
+          </span>
+        </Link>
+      ))}
       <a className="pill-banner" href="/settings">
         Sending as <strong>mail@unknowniitians.in</strong>
         <span className="dot ok" style={{ margin: '0 0 0 4px' }} />
@@ -88,8 +111,8 @@ export default async function Home() {
         <Column title="Campaigns" href="/campaigns">
           {campaigns.length === 0 && <div className="home-empty">No campaigns yet</div>}
           {campaigns.slice(0, 3).map((x) => (
-            <Row key={x.id} href={`/campaigns/${x.id}`} icon="campaigns">
-              {x.subject}
+            <Row key={x.id} href={x.status === 'draft' ? `/compose?draft=${x.id}` : `/campaigns/${x.id}`} icon="campaigns">
+              {x.subject || '(no subject)'}
             </Row>
           ))}
         </Column>
@@ -97,7 +120,7 @@ export default async function Home() {
           {groups.length === 0 && <div className="home-empty">No groups yet</div>}
           {groups.map((x) => (
             <Row key={x.id} href={`/groups/${x.id}`} icon="users">
-              {x.name} <span className="muted">· {x.emails.length}</span>
+              {x.name} <span className="muted">· {x.group_members?.[0]?.count ?? 0}</span>
             </Row>
           ))}
         </Column>

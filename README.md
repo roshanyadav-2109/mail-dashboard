@@ -73,3 +73,23 @@ SNS cannot reach localhost, so bounce/complaint events only arrive on the deploy
 - Typeface: [Inter](https://rsms.me/inter/) (SIL Open Font License 1.1), self-hosted in `public/fonts/`.
 - Icons: [Solar icon set](https://icon-sets.iconify.design/solar/) by 480 Design (CC BY 4.0), inlined in `src/app/icons.tsx`.
 - Colours and type settings follow Cloudflare's [Kumo](https://github.com/cloudflare/kumo) light theme.
+
+## Feature tour
+- **Compose**: visual builder, HTML or plain text; merge fields (`{{first_name|there}}`, `{{fields.batch}}`); live pre-send checks (spam signals, broken links, Outlook/Gmail compatibility, Gmail clipping); desktop/mobile/text/images-off previews; attachments; reply-to; preview text; test sends to up to 10 people; autosaved drafts; send now or schedule.
+- **Audience**: contacts with tags and custom fields, CSV import with column mapping, exports, duplicate merge; groups; rule-based segments; per-group unsubscribe; suppressions.
+- **Safety**: roles (admin / sender / viewer), optional approval for large sends, daily send limit, activity log, sender-health warnings against SES thresholds.
+- **Insights**: per-campaign link clicks, opens, bounces; analytics charts; CSV exports.
+- **Growth**: hosted signup forms + embed snippet with double opt-in.
+
+## Background sending (scheduled + in-progress campaigns)
+Supabase `pg_cron` calls `POST /api/cron/tick` every minute with `Authorization: Bearer $CRON_SECRET`.
+Set `CRON_SECRET` in Vercel, then run once in the Supabase SQL editor:
+
+```sql
+select cron.schedule('mail-dashboard-tick', '* * * * *', $$
+  select net.http_post(
+    url := 'https://<your-app>/api/cron/tick',
+    headers := jsonb_build_object('Authorization', 'Bearer <CRON_SECRET>')
+  )
+$$);
+```

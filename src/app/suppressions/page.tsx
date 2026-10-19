@@ -1,7 +1,7 @@
 import { revalidatePath } from 'next/cache'
 
 import { db } from '@/lib/db'
-import { requireUser } from '@/lib/guard'
+import { requireRole, requireUser } from '@/lib/guard'
 import { suppress } from '@/lib/suppress'
 
 import PageHead from '../page-head'
@@ -38,7 +38,7 @@ export default async function Suppressions({ searchParams }: { searchParams: Pro
               className="row"
               action={async (form) => {
                 'use server'
-                await requireUser()
+                await requireRole('sender')
                 const email = String(form.get('email') ?? '').trim()
                 if (email) await suppress(email, 'manual', 'added manually')
                 revalidatePath('/suppressions')
@@ -76,7 +76,7 @@ export default async function Suppressions({ searchParams }: { searchParams: Pro
                       <form
                         action={async () => {
                           'use server'
-                          await requireUser()
+                          await requireRole('sender')
                           await db().from('suppressions').delete().eq('email', r.email)
                           revalidatePath('/suppressions')
                         }}

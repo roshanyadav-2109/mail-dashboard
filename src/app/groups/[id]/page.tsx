@@ -2,15 +2,19 @@ import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 
+import { audit } from '@/lib/audit'
+import { addToGroup, fetchAll, upsertContacts } from '@/lib/audience'
 import { db } from '@/lib/db'
 import { parseEmails } from '@/lib/emails'
-import { requireUser } from '@/lib/guard'
+import { requireRole } from '@/lib/guard'
+import { atLeast } from '@/lib/roles'
 
 import PanelLayout from '../../panel-layout'
 
 export const dynamic = 'force-dynamic'
 
-type Group = { id: string; name: string; description: string; emails: string[]; created_at: string; updated_at: string }
+type Group = { id: string; name: string; description: string; created_at: string }
+type Member = { contact_id: string; contacts: { id: string; email: string; name: string } | null }
 
 export default async function GroupDetail({
   params,
@@ -19,7 +23,8 @@ export default async function GroupDetail({
   params: Promise<{ id: string }>
   searchParams: Promise<{ q?: string; error?: string }>
 }) {
-  await requireUser()
+  const me = await requireRole('viewer')
+  const canEdit = atLeast(me.role, 'sender')
   const { id } = await params
   const { q, error } = await searchParams
   const sb = db()
@@ -27,65 +32,90 @@ export default async function GroupDetail({
   if (!data) notFound()
   const group = data as Group
 
-  // Flag members who can no longer be emailed (bounced, complained or unsubscribed).
+  const members = (
+    await fetchAll<Member>((from, to) => sb.from('group_members').select('contact_id, contacts(id, email, name)').eq('group_id', id).range(from, to))
+  )
+    .map((m) => m.contacts)
+    .filter((c): c is NonNullable<Member['contacts']> => !!c)
+    .sort((a, b) => a.email.localeCompare(b.email))
+
+  // Who will be skipped: suppressed everywhere, or left this group.
+  const { data: outs } = await sb.from('group_optouts').select('email').eq('group_id', id)
+  const left = new Set((outs ?? []).map((o: { email: string }) => o.email))
   const blocked = new Map<string, string>()
-  for (let i = 0; i < group.emails.length; i += 200) {
-    const { data: rows } = await sb.from('suppressions').select('email, reason').in('email', group.emails.slice(i, i + 200))
+  const emails = members.map((m) => m.email)
+  for (let i = 0; i < emails.length; i += 200) {
+    const { data: rows } = await sb.from('suppressions').select('email, reason').in('email', emails.slice(i, i + 200))
     rows?.forEach((r: { email: string; reason: string }) => blocked.set(r.email, r.reason))
   }
 
   const needle = q?.trim().toLowerCase()
-  const shown = (needle ? group.emails.filter((e) => e.includes(needle)) : group.emails).slice(0, 500)
+  const shown = (needle ? members.filter((m) => m.email.includes(needle) || m.name.toLowerCase().includes(needle)) : members).slice(0, 500)
+  const skipped = members.filter((m) => blocked.has(m.email) || left.has(m.email)).length
 
-  const save = async (emails: string[], extra: Record<string, unknown> = {}) => {
-    await db().from('groups').update({ emails, updated_at: new Date().toISOString(), ...extra }).eq('id', id)
-    revalidatePath(`/groups/${id}`)
-  }
-
-  const members = (
+  const table = (
     <div className="card">
       <div className="card-head">
         <h2>
-          Members ({group.emails.length})
-          {blocked.size > 0 && <span className="muted"> · {blocked.size} will be skipped</span>}
+          {members.length} members{skipped > 0 && <span className="muted"> · {skipped} will be skipped</span>}
         </h2>
         <form className="row">
           <input name="q" defaultValue={q} placeholder="Search members" style={{ width: 200 }} />
           <button className="ghost" type="submit">
             Search
           </button>
+          <a className="btn ghost" href={`/api/export/group/${id}`}>
+            Export CSV
+          </a>
         </form>
       </div>
       {shown.length === 0 ? (
-        <div className="empty">{needle ? 'No members match your search.' : 'No members yet. Open “Manage group” to add some.'}</div>
+        <div className="empty">{needle ? 'No members match your search.' : 'No members yet.'}</div>
       ) : (
         <div className="scroll">
           <table>
             <thead>
               <tr>
                 <th>Email</th>
+                <th className="hide-sm">Name</th>
                 <th>Status</th>
                 <th />
               </tr>
             </thead>
             <tbody>
-              {shown.map((email) => (
-                <tr key={email}>
-                  <td>{email}</td>
-                  <td>{blocked.has(email) ? <span className="badge bounced">{blocked.get(email)}</span> : <span className="badge delivered">active</span>}</td>
+              {shown.map((m) => (
+                <tr key={m.id}>
+                  <td>
+                    <Link className="link" href={`/contacts/${m.id}`}>
+                      {m.email}
+                    </Link>
+                  </td>
+                  <td className="hide-sm">{m.name || <span className="muted">—</span>}</td>
+                  <td>
+                    {blocked.has(m.email) ? (
+                      <span className="badge bounced">{blocked.get(m.email)}</span>
+                    ) : left.has(m.email) ? (
+                      <span className="badge suppressed">left group</span>
+                    ) : (
+                      <span className="badge delivered">active</span>
+                    )}
+                  </td>
                   <td style={{ textAlign: 'right' }}>
-                    <form
-                      action={async () => {
-                        'use server'
-                        await requireUser()
-                        const { data: g } = await db().from('groups').select('emails').eq('id', id).single()
-                        await save(((g?.emails ?? []) as string[]).filter((e) => e !== email))
-                      }}
-                    >
-                      <button className="ghost" type="submit">
-                        Remove
-                      </button>
-                    </form>
+                    {canEdit && (
+                      <form
+                        action={async () => {
+                          'use server'
+                          const actor = await requireRole('sender')
+                          await db().from('group_members').delete().eq('group_id', id).eq('contact_id', m.id)
+                          await audit(actor.email, 'group.member_removed', { type: 'group', id }, { email: m.email })
+                          revalidatePath(`/groups/${id}`)
+                        }}
+                      >
+                        <button className="ghost" type="submit">
+                          Remove
+                        </button>
+                      </form>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -96,19 +126,20 @@ export default async function GroupDetail({
     </div>
   )
 
-  // Everything secondary lives in one panel, separated by dividers, instead of three separate cards.
   const manage = (
     <>
       <form
         className="panel-sec"
         action={async (form) => {
           'use server'
-          await requireUser()
+          const actor = await requireRole('sender')
           const file = form.get('file')
           const fromFile = file instanceof File && file.size > 0 ? await file.text() : ''
           const added = parseEmails(`${form.get('emails') ?? ''} ${fromFile}`)
-          const { data: g } = await db().from('groups').select('emails').eq('id', id).single()
-          await save([...new Set([...((g?.emails ?? []) as string[]), ...added])])
+          const ids = await upsertContacts(added.map((email) => ({ email })))
+          await addToGroup(id, [...ids.values()])
+          await audit(actor.email, 'group.members_added', { type: 'group', id }, { count: ids.size })
+          revalidatePath(`/groups/${id}`)
         }}
       >
         <div className="panel-label">Add members</div>
@@ -123,12 +154,15 @@ export default async function GroupDetail({
         className="panel-sec"
         action={async (form) => {
           'use server'
-          await requireUser()
+          const actor = await requireRole('sender')
           const name = String(form.get('name') ?? '').trim()
           if (!name) return
           const { data: clash } = await db().from('groups').select('id').eq('name', name).neq('id', id).maybeSingle()
           if (clash) redirect(`/groups/${id}?error=exists`)
-          await save(group.emails, { name, description: String(form.get('description') ?? '').trim() })
+          const description = String(form.get('description') ?? '').trim()
+          await db().from('groups').update({ name, description, updated_at: new Date().toISOString() }).eq('id', id)
+          await audit(actor.email, 'group.updated', { type: 'group', id }, { name })
+          revalidatePath(`/groups/${id}`)
         }}
       >
         <div className="panel-label">Details</div>
@@ -146,8 +180,9 @@ export default async function GroupDetail({
         className="panel-sec"
         action={async () => {
           'use server'
-          await requireUser()
+          const actor = await requireRole('sender')
           await db().from('groups').delete().eq('id', id)
+          await audit(actor.email, 'group.deleted', { type: 'group', id }, { name: group.name })
           redirect('/groups')
         }}
       >
@@ -162,18 +197,21 @@ export default async function GroupDetail({
   return (
     <PanelLayout
       title={group.name}
-        description={group.description || undefined}
-        back={{ href: '/groups', name: 'Groups' }}
-        actions={
+      description={group.description || undefined}
+      back={{ href: '/groups', name: 'Groups' }}
+      actions={
+        canEdit ? (
           <Link className="btn" href={`/compose?group=${id}`}>
             Send email to this group
           </Link>
-        }
-      main={members}
+        ) : undefined
+      }
+      main={table}
       panel={manage}
       panelLabel="Manage group"
       panelTitle="Manage group"
       defaultOpen={!!error}
+      hidePanel={!canEdit}
     />
   )
 }

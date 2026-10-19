@@ -4,30 +4,14 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useEffect } from 'react'
 
-import Icon, { type IconName } from './icons'
+import { atLeast, type Role } from '@/lib/roles'
 
-const GROUPS: { label?: string; items: { href: string; name: string; icon: IconName }[] }[] = [
-  { items: [{ href: '/', name: 'Account home', icon: 'home' }] },
-  {
-    label: 'Email',
-    items: [
-      { href: '/compose', name: 'Compose', icon: 'send' },
-      { href: '/campaigns', name: 'Campaigns', icon: 'campaigns' },
-      { href: '/groups', name: 'Groups', icon: 'users' },
-    ],
-  },
-  {
-    label: 'Protect & deliver',
-    items: [
-      { href: '/suppressions', name: 'Suppressions', icon: 'ban' },
-      { href: '/settings', name: 'Settings', icon: 'settings' },
-    ],
-  },
-]
+import Icon from './icons'
+import { NAV } from './nav'
 
 const KEY = 'mail-side-collapsed'
 
-export default function Sidebar({ email }: { email: string }) {
+export default function Sidebar({ email, role }: { email: string; role: Role }) {
   const path = usePathname()
   const active = (href: string) => (href === '/' ? path === '/' : path === href || path.startsWith(`${href}/`))
 
@@ -47,6 +31,8 @@ export default function Sidebar({ email }: { email: string }) {
       localStorage.setItem(KEY, on ? '1' : '0')
     } catch {}
   }
+
+  const groups = NAV.map((g) => ({ ...g, items: g.items.filter((i) => atLeast(role, i.min)) })).filter((g) => g.items.length)
 
   return (
     <aside className="sidebar">
@@ -71,7 +57,7 @@ export default function Sidebar({ email }: { email: string }) {
       </div>
 
       <nav className="side-nav">
-        {GROUPS.map((g, i) => (
+        {groups.map((g, i) => (
           <div key={g.label ?? i}>
             {g.label && <div className="nav-label">{g.label}</div>}
             {g.items.map((it) => (

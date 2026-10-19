@@ -3,19 +3,15 @@
 import { useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 
-import Icon, { type IconName } from './icons'
+import { atLeast, type Role } from '@/lib/roles'
 
-const ITEMS: { name: string; href: string; icon: IconName; hint: string }[] = [
-  { name: 'Account home', href: '/', icon: 'home', hint: 'Overview' },
-  { name: 'Compose a new campaign', href: '/compose', icon: 'send', hint: 'Email' },
-  { name: 'Campaigns', href: '/campaigns', icon: 'campaigns', hint: 'Email' },
-  { name: 'Groups', href: '/groups', icon: 'users', hint: 'Email' },
-  { name: 'Suppressions', href: '/suppressions', icon: 'ban', hint: 'Protect & deliver' },
-  { name: 'Settings', href: '/settings', icon: 'settings', hint: 'Protect & deliver' },
-]
+import Icon from './icons'
+import { NAV } from './nav'
+
 
 /** Ctrl/⌘+K quick search over the dashboard's pages. Other components open it with the 'open-palette' event. */
-export default function Palette() {
+export default function Palette({ role }: { role: Role }) {
+  const ITEMS = NAV.flatMap((g) => g.items.filter((i) => atLeast(role, i.min)).map((i) => ({ ...i, hint: g.label ?? 'Home' })))
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')

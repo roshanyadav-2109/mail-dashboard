@@ -8,6 +8,7 @@ import PageHead from './page-head'
 /**
  * Page header + one main area + a collapsible right-hand panel for secondary forms and settings.
  * The panel toggle sits in the header next to the page's main action, so it takes no extra row.
+ * `hidePanel` drops the panel and its toggle entirely (e.g. for read-only roles).
  */
 export default function PanelLayout({
   title,
@@ -19,6 +20,7 @@ export default function PanelLayout({
   panelLabel,
   panelTitle,
   defaultOpen = false,
+  hidePanel = false,
 }: {
   title: string
   description?: string
@@ -29,8 +31,9 @@ export default function PanelLayout({
   panelLabel: string
   panelTitle: string
   defaultOpen?: boolean
+  hidePanel?: boolean
 }) {
-  const [open, setOpen] = useState(defaultOpen)
+  const [open, setOpen] = useState(defaultOpen && !hidePanel)
 
   return (
     <>
@@ -39,13 +42,17 @@ export default function PanelLayout({
         description={description}
         back={back}
         actions={
-          <>
-            <button type="button" className="ghost" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
-              <Icon name="panel" size={16} />
-              {panelLabel}
-            </button>
-            {actions}
-          </>
+          hidePanel && !actions ? undefined : (
+            <>
+              {!hidePanel && (
+                <button type="button" className="ghost" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+                  <Icon name="panel" size={16} />
+                  {panelLabel}
+                </button>
+              )}
+              {actions}
+            </>
+          )
         }
       />
       <div className="workspace">

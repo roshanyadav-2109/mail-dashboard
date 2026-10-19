@@ -1,25 +1,39 @@
+import { audit } from '@/lib/audit'
+import { addToGroup, upsertContacts } from '@/lib/audience'
 import { db } from '@/lib/db'
 import { parseEmails } from '@/lib/emails'
-import { apiUser } from '@/lib/guard'
+import { apiRole } from '@/lib/guard'
 
+/** Groups with member counts (used by the composer's recipient picker). */
 export async function GET() {
-  if (!(await apiUser())) return Response.json({ error: 'forbidden' }, { status: 403 })
-  const { data } = await db().from('groups').select('id, name, description, emails').order('name')
-  return Response.json({ groups: data ?? [] })
+  if (!(await apiRole('viewer'))) return Response.json({ error: 'forbidden' }, { status: 403 })
+  const { data } = await db().from('groups').select('id, name, description, group_members(count)').order('name')
+  const groups = (data ?? []).map((g: { id: string; name: string; description: string; group_members: { count: number }[] }) => ({
+    id: g.id,
+    name: g.name,
+    description: g.description,
+    count: g.group_members?.[0]?.count ?? 0,
+  }))
+  return Response.json({ groups })
 }
 
-// Creates a group, or replaces the members of an existing one with the same name.
+// Creates a group from a list of addresses (the composer's "Save as group").
 export async function POST(req: Request) {
-  if (!(await apiUser())) return Response.json({ error: 'forbidden' }, { status: 403 })
+  const me = await apiRole('sender')
+  if (!me) return Response.json({ error: 'forbidden' }, { status: 403 })
   const { name, description, emails } = (await req.json()) as { name: string; description?: string; emails: string[] }
   if (!name?.trim() || !Array.isArray(emails)) return Response.json({ error: 'name and emails required' }, { status: 400 })
-  const { data, error } = await db()
+  const sb = db()
+  const { data: clash } = await sb.from('groups').select('id').eq('name', name.trim()).maybeSingle()
+  if (clash) return Response.json({ error: 'A group with that name already exists' }, { status: 409 })
+  const { data: group, error } = await sb
     .from('groups')
-    .upsert(
-      { name: name.trim(), description: description?.trim() ?? '', emails: parseEmails(emails.join(' ')), updated_at: new Date().toISOString() },
-      { onConflict: 'name' },
-    )
+    .insert({ name: name.trim(), description: description?.trim() ?? '' })
     .select('id')
     .single()
-  return error ? Response.json({ error: error.message }, { status: 500 }) : Response.json({ ok: true, id: data.id })
+  if (error || !group) return Response.json({ error: error?.message ?? 'failed' }, { status: 500 })
+  const ids = await upsertContacts(parseEmails(emails.join(' ')).map((email) => ({ email })))
+  await addToGroup(group.id, [...ids.values()])
+  await audit(me.email, 'group.created', { type: 'group', id: group.id }, { name: name.trim(), members: ids.size })
+  return Response.json({ ok: true, id: group.id })
 }

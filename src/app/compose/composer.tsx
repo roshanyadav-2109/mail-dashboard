@@ -1,319 +1,536 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
+import type { Audience } from '@/lib/audience'
+import type { Content } from '@/lib/content'
+import { lint } from '@/lib/lint'
+import { SAMPLE, type MergeData } from '@/lib/render'
+
+import EmailEditor from '../editor/email-editor'
+import { uploadFile } from '../editor/upload'
 import Icon from '../icons'
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-const STARTER = `<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto">
-  <h2>Hello!</h2>
-  <p>Write your HTML email here.</p>
-</div>`
+const extract = (text: string) => [...new Set(text.split(/[\s,;]+/).map((s) => s.trim().replace(/^["'<]+|["'>]+$/g, '').toLowerCase()).filter((s) => EMAIL.test(s)))]
+const kb = (n: number) => (n > 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`)
 
-// Pulls every email-looking token out of pasted text or a CSV file's contents.
-const extract = (text: string) =>
-  text
-    .split(/[\s,;]+/)
-    .map((s) => s.trim().replace(/^["'<]+|["'>]+$/g, '').toLowerCase())
-    .filter((s) => EMAIL.test(s))
+type Attachment = { path: string; name: string; type: string; size: number }
+type Preview = {
+  count: number
+  emails: string[]
+  suppressed: number
+  optedOut: number
+  remainingToday: number
+  dailyLimit: number
+  approvalNeeded: boolean
+  approvalThreshold: number
+  sample: MergeData | null
+}
 
-type Group = { id: string; name: string; description: string; emails: string[] }
+/** Local datetime value for <input type="datetime-local">. */
+const localInput = (d: Date) => new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 16)
 
-/**
- * Single-workspace composer: subject + actions on top, recipients summary below, then the editor with an
- * optional preview pane on the right. Recipients are edited in a drawer that slides over the editor.
- */
-export default function Composer({ initialGroup }: { initialGroup?: string }) {
+export default function Composer(props: {
+  draftId: string | null
+  initialContent: Content
+  initialAudience: Audience
+  initialReplyTo: string
+  initialAttachments: Attachment[]
+  templateId: string | null
+  groups: { id: string; name: string; count: number }[]
+  segments: { id: string; name: string }[]
+  fromLine: string
+  defaultReplyTo: string
+  defaultTestTo: string[]
+}) {
   const router = useRouter()
-  const [groups, setGroups] = useState<Group[]>([])
-  const [selected, setSelected] = useState<string[]>([]) // chosen group ids
-  const [extra, setExtra] = useState<string[]>([]) // addresses typed or uploaded
-  const [removed, setRemoved] = useState<string[]>([]) // addresses taken out of the final list
-  const [manual, setManual] = useState('')
-  const [subject, setSubject] = useState('')
-  const [html, setHtml] = useState(STARTER)
-  const [plain, setPlain] = useState('')
-  const [format, setFormat] = useState<'html' | 'text'>('html')
-  const [device, setDevice] = useState<'desktop' | 'mobile'>('desktop')
-  const [showPreview, setShowPreview] = useState(true)
-  const [pane, setPane] = useState<'edit' | 'preview'>('edit') // phones show one pane at a time
-  const [drawer, setDrawer] = useState(false)
-  const [busy, setBusy] = useState(false)
+  const [draftId, setDraftId] = useState(props.draftId)
+  const [content, setContent] = useState<Content>(props.initialContent)
+  const [audience, setAudience] = useState<Audience>(props.initialAudience)
+  const [replyTo, setReplyTo] = useState(props.initialReplyTo)
+  const [attachments, setAttachments] = useState<Attachment[]>(props.initialAttachments)
+  const [testTo, setTestTo] = useState(props.defaultTestTo.join(', '))
+  const [preview, setPreview] = useState<Preview | null>(null)
+  const [drawer, setDrawer] = useState<'recipients' | 'options' | null>(null)
+  const [dialog, setDialog] = useState(false)
+  const [save, setSave] = useState<{ state: 'idle' | 'saving' | 'saved' | 'error'; at?: string; msg?: string }>({ state: props.draftId ? 'saved' : 'idle' })
   const [note, setNote] = useState('')
-  const preselected = useRef(false)
+  const [busy, setBusy] = useState(false)
+  const [manual, setManual] = useState('')
+  const [uploading, setUploading] = useState(false)
+  const [when, setWhen] = useState<'now' | 'later'>('now')
+  const [at, setAt] = useState(localInput(new Date(Date.now() + 60 * 60_000)))
 
+  // ── Live recipient preview ────────────────────────────────────────────────
+  const audienceKey = JSON.stringify(audience)
   useEffect(() => {
-    fetch('/api/groups')
-      .then((r) => r.json())
-      .then((d) => {
-        const list: Group[] = d.groups ?? []
-        setGroups(list)
-        if (initialGroup && !preselected.current && list.some((g) => g.id === initialGroup)) {
-          preselected.current = true
-          setSelected([initialGroup])
+    const t = setTimeout(async () => {
+      const res = await fetch('/api/audience/preview', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ audience }) })
+      if (res.ok) setPreview(await res.json())
+    }, 400)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [audienceKey])
+
+  // ── Autosave ──────────────────────────────────────────────────────────────
+  const payload = useMemo(
+    () => ({
+      subject: content.subject,
+      preheader: content.preheader,
+      format: content.format,
+      html: content.html,
+      text: content.text,
+      blocks: content.blocks,
+      reply_to: replyTo,
+      audience,
+      attachments,
+      template_id: props.templateId,
+    }),
+    [content, replyTo, audience, attachments, props.templateId],
+  )
+  const initialPayload = useRef(JSON.stringify(payload))
+  const latest = useRef(payload)
+  latest.current = payload
+  const idRef = useRef(draftId)
+  idRef.current = draftId
+  const saving = useRef<Promise<string | null> | null>(null)
+
+  const persist = useCallback(async (): Promise<string | null> => {
+    if (saving.current) await saving.current
+    const run = (async () => {
+      setSave({ state: 'saving' })
+      try {
+        const id = idRef.current
+        const res = await fetch(id ? `/api/campaigns/${id}` : '/api/campaigns', {
+          method: id ? 'PATCH' : 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(latest.current),
+        })
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error ?? 'save failed')
+        if (!id) {
+          setDraftId(data.id)
+          idRef.current = data.id
+          window.history.replaceState(null, '', `/compose?draft=${data.id}`)
         }
-      })
-      .catch(() => {})
-  }, [initialGroup])
+        setSave({ state: 'saved', at: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) })
+        return idRef.current
+      } catch (e) {
+        setSave({ state: 'error', msg: e instanceof Error ? e.message : 'save failed' })
+        return null
+      }
+    })()
+    saving.current = run
+    const id = await run
+    saving.current = null
+    return id
+  }, [])
 
-  // Final recipients: every selected group's members plus typed/uploaded addresses, minus anything removed.
-  const recipients = useMemo(() => {
-    const fromGroups = groups.filter((g) => selected.includes(g.id)).flatMap((g) => g.emails)
-    return [...new Set([...fromGroups, ...extra])].filter((e) => !removed.includes(e))
-  }, [groups, selected, extra, removed])
+  const payloadKey = JSON.stringify(payload)
+  useEffect(() => {
+    // Don't create an empty draft just because the page was opened.
+    if (!idRef.current && payloadKey === initialPayload.current) return
+    const t = setTimeout(() => void persist(), 1200)
+    return () => clearTimeout(t)
+  }, [payloadKey, persist])
 
-  const toggleGroup = (id: string) => {
-    setRemoved([])
-    setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]))
-  }
-  const addExtra = (emails: string[]) => {
-    setRemoved((r) => r.filter((e) => !emails.includes(e)))
-    setExtra((x) => [...new Set([...x, ...emails])])
-  }
-  const clearAll = () => {
-    setSelected([])
-    setExtra([])
-    setRemoved([])
-  }
+  // ── Recipients ────────────────────────────────────────────────────────────
+  const toggle = (key: 'groups' | 'segments', id: string) =>
+    setAudience((a) => ({ ...a, [key]: a[key].includes(id) ? a[key].filter((x) => x !== id) : [...a[key], id] }))
+  const addEmails = (list: string[]) =>
+    setAudience((a) => ({ ...a, emails: [...new Set([...a.emails, ...list])], exclude: (a.exclude ?? []).filter((e) => !list.includes(e)) }))
+  const removeOne = (email: string) =>
+    setAudience((a) => (a.emails.includes(email) ? { ...a, emails: a.emails.filter((e) => e !== email) } : { ...a, exclude: [...new Set([...(a.exclude ?? []), email])] }))
+  const restore = (email: string) => setAudience((a) => ({ ...a, exclude: (a.exclude ?? []).filter((e) => e !== email) }))
 
-  // The body for the chosen format; each format keeps its own draft so switching never loses text.
-  const body = format === 'html' ? html : plain
-  const previewDoc =
-    format === 'html'
-      ? html
-      : `<pre style="white-space:pre-wrap;word-wrap:break-word;font:14px/1.6 Arial,sans-serif;margin:16px;color:#222">${plain
-          .replace(/&/g, '&amp;')
-          .replace(/</g, '&lt;')
-          .replace(/>/g, '&gt;')}</pre>`
-
-  async function post(url: string, payload: unknown) {
-    const res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) })
+  async function saveAsGroup() {
+    const name = prompt('Name for the new group?')
+    if (!name || !preview?.emails.length) return
+    const res = await fetch('/api/groups', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, emails: preview.emails }) })
     const data = await res.json()
-    if (!res.ok) throw new Error(data.error ?? 'request failed')
-    return data
+    setNote(res.ok ? `Saved group “${name}”` : (data.error ?? 'failed'))
+  }
+
+  // ── Options ───────────────────────────────────────────────────────────────
+  async function attach(files: FileList | null) {
+    if (!files?.length) return
+    setUploading(true)
+    try {
+      for (const f of Array.from(files)) {
+        if (attachments.length >= 5) throw new Error('Up to 5 attachments')
+        if (attachments.reduce((s, a) => s + a.size, 0) + f.size > 10 * 1024 * 1024) throw new Error('Attachments must total 10 MB or less')
+        const { path } = await uploadFile('attachment', f)
+        setAttachments((list) => [...list, { path, name: f.name, type: f.type || 'application/octet-stream', size: f.size }])
+      }
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : 'upload failed')
+    }
+    setUploading(false)
+  }
+
+  async function saveTemplate() {
+    const name = prompt('Template name?', content.subject || 'My template')
+    if (!name) return
+    const res = await fetch('/api/templates', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name, subject: content.subject, format: content.format, html: content.html, text: content.text, blocks: content.blocks }),
+    })
+    setNote(res.ok ? `Saved template “${name}”` : 'Could not save template')
   }
 
   async function sendTest() {
     setBusy(true)
     setNote('')
-    try {
-      const d = await post('/api/test', { subject, html: body, format })
-      setNote(`Test sent to ${d.to}`)
-    } catch (e) {
-      setNote(e instanceof Error ? e.message : 'failed')
-    }
+    const res = await fetch('/api/test', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...payload, to: extract(testTo) }),
+    })
+    const data = await res.json()
+    setNote(res.ok ? `Test sent to ${data.to.join(', ')}` : (data.error ?? 'failed'))
     setBusy(false)
   }
 
-  async function saveAsGroup() {
-    const name = prompt('Name for the new group?')
-    if (!name) return
-    try {
-      await post('/api/groups', { name, emails: recipients })
-      const d = await (await fetch('/api/groups')).json()
-      setGroups(d.groups ?? [])
-      setNote(`Saved group "${name}"`)
-    } catch (e) {
-      setNote(e instanceof Error ? e.message : 'failed')
-    }
-  }
+  // ── Send / schedule ───────────────────────────────────────────────────────
+  const findings = useMemo(
+    () => lint({ subject: content.subject, preheader: content.preheader, format: content.format, html: content.html, text: content.text, attachments: attachments.length }),
+    [content, attachments.length],
+  )
+  const errors = findings.filter((f) => f.level === 'error')
+  const warnings = findings.filter((f) => f.level === 'warn')
 
-  async function start() {
-    if (!confirm(`Send "${subject}" to ${recipients.length} recipient(s)?`)) return
+  async function submit() {
     setBusy(true)
     setNote('')
-    try {
-      const d = await post('/api/campaigns', { subject, html: body, recipients, format })
-      router.push(`/campaigns/${d.id}?run=1`)
-    } catch (e) {
-      setNote(e instanceof Error ? e.message : 'failed')
+    const id = await persist()
+    if (!id) {
       setBusy(false)
+      return
     }
+    const res = await fetch(`/api/campaigns/${id}/submit`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(when === 'later' ? { when: new Date(at).toISOString() } : {}),
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      setNote(data.error ?? 'failed')
+      setBusy(false)
+      setDialog(false)
+      return
+    }
+    router.push(`/campaigns/${id}${data.status === 'sending' ? '?run=1' : ''}`)
   }
 
-  const selectedGroups = groups.filter((g) => selected.includes(g.id))
-  const canSend = !busy && recipients.length > 0 && !!subject.trim() && !!body.trim()
+  async function discard() {
+    if (!draftId || !confirm('Delete this draft?')) return
+    await fetch(`/api/campaigns/${draftId}`, { method: 'DELETE' })
+    router.push('/campaigns?status=draft')
+  }
+
+  const groupName = (id: string) => props.groups.find((g) => g.id === id)?.name ?? 'Group'
+  const segName = (id: string) => props.segments.find((s) => s.id === id)?.name ?? 'Segment'
+  const count = preview?.count ?? 0
+  const sample = preview?.sample ?? SAMPLE
 
   return (
     <div className="card composer">
       <div className="c-top">
-        <input className="subject" value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject" aria-label="Subject" />
-        {note && <span className="muted">{note}</span>}
-        <button className="ghost" disabled={busy || !subject.trim() || !body.trim()} onClick={sendTest}>
+        <input className="subject" value={content.subject} onChange={(e) => setContent({ ...content, subject: e.target.value })} placeholder="Subject" aria-label="Subject" />
+        <span className={`save-state ${save.state}`} title={save.msg}>
+          {save.state === 'saving' ? 'Saving…' : save.state === 'saved' ? `Draft saved ${save.at ?? ''}` : save.state === 'error' ? 'Not saved' : ''}
+        </span>
+        <button className="ghost" onClick={() => setDrawer(drawer === 'options' ? null : 'options')} aria-expanded={drawer === 'options'}>
+          Options{attachments.length ? ` · ${attachments.length}📎` : ''}
+        </button>
+        <button className="ghost" disabled={busy} onClick={sendTest}>
           Send test
         </button>
-        <button disabled={!canSend} onClick={start}>
+        <button disabled={busy || count === 0} onClick={() => setDialog(true)}>
           <Icon name="send" size={16} />
-          Send to {recipients.length}
+          Send…
         </button>
       </div>
+
+      {content.format === 'html' && (
+        <div className="c-meta">
+          <input value={content.preheader} onChange={(e) => setContent({ ...content, preheader: e.target.value })} placeholder="Preview text (shown after the subject in the inbox)" aria-label="Preview text" />
+        </div>
+      )}
 
       <div className="c-to">
         <span className="muted" style={{ width: 24 }}>
           To
         </span>
         <div className="to-chips">
-          {selectedGroups.map((g) => (
-            <span className="chip" key={g.id}>
-              {g.name} · {g.emails.length} <a onClick={() => toggleGroup(g.id)}>×</a>
+          {audience.groups.map((id) => (
+            <span className="chip" key={id}>
+              {groupName(id)} <a onClick={() => toggle('groups', id)}>×</a>
             </span>
           ))}
-          {extra.filter((e) => !removed.includes(e)).length > 0 && (
-            <span className="chip">{extra.filter((e) => !removed.includes(e)).length} individual addresses</span>
+          {audience.segments.map((id) => (
+            <span className="chip" key={id}>
+              ◇ {segName(id)} <a onClick={() => toggle('segments', id)}>×</a>
+            </span>
+          ))}
+          {audience.emails.length > 0 && <span className="chip">{audience.emails.length} addresses</span>}
+          {preview && (
+            <span className="muted">
+              {count} recipient{count === 1 ? '' : 's'}
+              {preview.suppressed + preview.optedOut > 0 ? ` · ${preview.suppressed + preview.optedOut} skipped` : ''}
+            </span>
           )}
-          {recipients.length === 0 && <span className="muted">No recipients yet</span>}
         </div>
-        <button className={recipients.length ? 'ghost' : ''} onClick={() => setDrawer((d) => !d)} aria-expanded={drawer}>
+        <button className={count ? 'ghost' : ''} onClick={() => setDrawer(drawer === 'recipients' ? null : 'recipients')} aria-expanded={drawer === 'recipients'}>
           <Icon name="users" size={16} />
-          {recipients.length ? `Recipients (${recipients.length})` : 'Add recipients'}
+          {count ? 'Edit recipients' : 'Add recipients'}
         </button>
       </div>
 
-      <div className="pane-switch" role="tablist" aria-label="Editor or preview">
-        <button type="button" role="tab" aria-selected={pane === 'edit'} className={`tab${pane === 'edit' ? ' on' : ''}`} onClick={() => setPane('edit')}>
-          Edit
-        </button>
-        <button type="button" role="tab" aria-selected={pane === 'preview'} className={`tab${pane === 'preview' ? ' on' : ''}`} onClick={() => setPane('preview')}>
-          Preview
-        </button>
-      </div>
+      {note && (
+        <div className="c-note">
+          {note}
+          <button className="icon-btn" onClick={() => setNote('')} aria-label="Dismiss">
+            ×
+          </button>
+        </div>
+      )}
 
-      <div className="c-body" data-pane={pane}>
-        <section className="c-editor">
-          <div className="tabbar" role="tablist" aria-label="Message format">
-            <button type="button" role="tab" aria-selected={format === 'html'} className={`tab${format === 'html' ? ' on' : ''}`} onClick={() => setFormat('html')}>
-              HTML
-            </button>
-            <button type="button" role="tab" aria-selected={format === 'text'} className={`tab${format === 'text' ? ' on' : ''}`} onClick={() => setFormat('text')}>
-              Plain text
-            </button>
-            <span className="spacer" style={{ flex: 1 }} />
-            <button type="button" className="icon-btn" onClick={() => setShowPreview((s) => !s)} aria-pressed={showPreview} title={showPreview ? 'Hide preview' : 'Show preview'}>
-              <Icon name="panel" />
+      <EmailEditor content={content} onChange={setContent} sample={sample} fromLine={props.fromLine} attachments={attachments.length} />
+
+      {drawer === 'recipients' && (
+        <aside className="drawer">
+          <div className="ws-panel-head">
+            <h2>Recipients · {count}</h2>
+            <button type="button" className="icon-btn" onClick={() => setDrawer(null)} aria-label="Close">
+              ×
             </button>
           </div>
-          {format === 'html' ? (
-            <textarea className="editor" value={html} onChange={(e) => setHtml(e.target.value)} spellCheck={false} />
-          ) : (
-            <textarea className="editor plain" value={plain} onChange={(e) => setPlain(e.target.value)} placeholder="Write your message…" />
-          )}
-        </section>
-
-        {(
-          <section className="c-preview" data-hide={showPreview ? '0' : '1'}>
-            <div className="tabbar">
-              <span style={{ fontWeight: 500 }}>Preview</span>
-              <span className="spacer" style={{ flex: 1 }} />
-              <div className="pills">
-                <button type="button" className={`pill${device === 'desktop' ? ' on' : ''}`} onClick={() => setDevice('desktop')}>
-                  Desktop
-                </button>
-                <button type="button" className={`pill${device === 'mobile' ? ' on' : ''}`} onClick={() => setDevice('mobile')}>
-                  Mobile
-                </button>
-              </div>
-            </div>
-            <div className="inbox-head">
-              <div>
-                <span className="muted">From</span> Unknown IITians &lt;mail@unknowniitians.in&gt;
-              </div>
-              <div className="inbox-subject">{subject.trim() || '(no subject)'}</div>
-            </div>
-            <div className="preview-stage">
-              <iframe sandbox="" srcDoc={previewDoc} title="Email preview" style={{ width: device === 'mobile' ? 375 : '100%' }} />
-            </div>
-          </section>
-        )}
-
-        {drawer && (
-          <aside className="drawer">
-            <div className="ws-panel-head">
-              <h2>Recipients ({recipients.length})</h2>
-              <button type="button" className="icon-btn" onClick={() => setDrawer(false)} aria-label="Close">
-                ×
-              </button>
-            </div>
-            <div className="ws-panel-body">
-              <div className="panel-sec">
-                <div className="panel-label">Groups</div>
-                {groups.length === 0 ? (
-                  <p className="muted" style={{ margin: 0 }}>
-                    No groups yet. Create one under Groups.
-                  </p>
-                ) : (
-                  <div className="pills">
-                    {groups.map((g) => (
-                      <button key={g.id} type="button" className={`pill${selected.includes(g.id) ? ' on' : ''}`} onClick={() => toggleGroup(g.id)} aria-pressed={selected.includes(g.id)}>
-                        {g.name} · {g.emails.length}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="panel-sec">
-                <div className="panel-label">Add addresses</div>
-                <textarea rows={3} value={manual} onChange={(e) => setManual(e.target.value)} placeholder="name@example.com, other@example.com" />
-                <div className="row" style={{ marginTop: 8 }}>
-                  <button
-                    onClick={() => {
-                      addExtra(extract(manual))
-                      setManual('')
-                    }}
-                  >
-                    Add
-                  </button>
-                  <label className="btn ghost" style={{ margin: 0 }}>
-                    Upload CSV
-                    <input
-                      type="file"
-                      accept=".csv,.txt"
-                      style={{ display: 'none' }}
-                      onChange={async (e) => {
-                        const f = e.target.files?.[0]
-                        if (f) addExtra(extract(await f.text()))
-                        e.target.value = ''
-                      }}
-                    />
-                  </label>
-                </div>
-              </div>
-
-              <div className="panel-sec">
-                <div className="row" style={{ justifyContent: 'space-between' }}>
-                  <div className="panel-label" style={{ margin: 0 }}>
-                    Final list
-                  </div>
-                  <div className="row">
-                    <button className="ghost" onClick={saveAsGroup} disabled={!recipients.length}>
-                      Save as group
+          <div className="ws-panel-body">
+            <div className="panel-sec">
+              <div className="panel-label">Groups</div>
+              {props.groups.length === 0 ? (
+                <p className="muted" style={{ margin: 0 }}>
+                  No groups yet.
+                </p>
+              ) : (
+                <div className="pills">
+                  {props.groups.map((g) => (
+                    <button key={g.id} type="button" className={`pill${audience.groups.includes(g.id) ? ' on' : ''}`} onClick={() => toggle('groups', g.id)} aria-pressed={audience.groups.includes(g.id)}>
+                      {g.name} · {g.count}
                     </button>
-                    <button className="ghost" onClick={clearAll} disabled={!recipients.length}>
-                      Clear
-                    </button>
-                  </div>
+                  ))}
                 </div>
-                <div className="chips" style={{ maxHeight: 'none' }}>
-                  {recipients.map((r) => (
-                    <span className="chip" key={r}>
-                      {r}{' '}
-                      <a
-                        onClick={() => {
-                          setExtra((x) => x.filter((e) => e !== r))
-                          setRemoved((x) => [...x, r])
-                        }}
-                      >
-                        ×
-                      </a>
-                    </span>
+              )}
+            </div>
+            {props.segments.length > 0 && (
+              <div className="panel-sec">
+                <div className="panel-label">Segments</div>
+                <div className="pills">
+                  {props.segments.map((s) => (
+                    <button key={s.id} type="button" className={`pill${audience.segments.includes(s.id) ? ' on' : ''}`} onClick={() => toggle('segments', s.id)} aria-pressed={audience.segments.includes(s.id)}>
+                      {s.name}
+                    </button>
                   ))}
                 </div>
               </div>
+            )}
+            <div className="panel-sec">
+              <div className="panel-label">Add addresses</div>
+              <textarea rows={3} value={manual} onChange={(e) => setManual(e.target.value)} placeholder="name@example.com, other@example.com" />
+              <div className="row" style={{ marginTop: 8 }}>
+                <button
+                  onClick={() => {
+                    addEmails(extract(manual))
+                    setManual('')
+                  }}
+                >
+                  Add
+                </button>
+                <label className="btn ghost" style={{ margin: 0 }}>
+                  Upload CSV
+                  <input
+                    type="file"
+                    accept=".csv,.txt"
+                    hidden
+                    onChange={async (e) => {
+                      const f = e.target.files?.[0]
+                      if (f) addEmails(extract(await f.text()))
+                      e.target.value = ''
+                    }}
+                  />
+                </label>
+              </div>
             </div>
-          </aside>
-        )}
-      </div>
+            <div className="panel-sec">
+              <div className="row" style={{ justifyContent: 'space-between' }}>
+                <div className="panel-label" style={{ margin: 0 }}>
+                  Final list · {count}
+                </div>
+                <button className="ghost" onClick={saveAsGroup} disabled={!count}>
+                  Save as group
+                </button>
+              </div>
+              {preview && (preview.suppressed > 0 || preview.optedOut > 0) && (
+                <p className="muted" style={{ margin: '8px 0 0' }}>
+                  Skipping {preview.suppressed} suppressed{preview.optedOut ? ` and ${preview.optedOut} who left the group` : ''}.
+                </p>
+              )}
+              <div className="chips" style={{ maxHeight: 'none' }}>
+                {(preview?.emails ?? []).map((e) => (
+                  <span className="chip" key={e}>
+                    {e} <a onClick={() => removeOne(e)}>×</a>
+                  </span>
+                ))}
+                {(preview?.count ?? 0) > (preview?.emails.length ?? 0) && <span className="muted">+ {(preview?.count ?? 0) - (preview?.emails.length ?? 0)} more</span>}
+              </div>
+              {(audience.exclude ?? []).length > 0 && (
+                <>
+                  <div className="panel-label" style={{ marginTop: 14 }}>
+                    Removed
+                  </div>
+                  <div className="chips">
+                    {(audience.exclude ?? []).map((e) => (
+                      <span className="chip" key={e}>
+                        {e} <a onClick={() => restore(e)}>↺</a>
+                      </span>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </aside>
+      )}
+
+      {drawer === 'options' && (
+        <aside className="drawer">
+          <div className="ws-panel-head">
+            <h2>Options</h2>
+            <button type="button" className="icon-btn" onClick={() => setDrawer(null)} aria-label="Close">
+              ×
+            </button>
+          </div>
+          <div className="ws-panel-body">
+            <div className="panel-sec">
+              <div className="panel-label">Reply-to</div>
+              <input type="email" value={replyTo} onChange={(e) => setReplyTo(e.target.value)} placeholder={props.defaultReplyTo || 'Replies go to the sender address'} />
+            </div>
+            <div className="panel-sec">
+              <div className="panel-label">Attachments · {attachments.length}/5</div>
+              {attachments.map((a) => (
+                <div key={a.path} className="file-row">
+                  <span className="file-name">📎 {a.name}</span>
+                  <span className="muted">{kb(a.size)}</span>
+                  <button className="icon-btn" onClick={() => setAttachments((l) => l.filter((x) => x.path !== a.path))} aria-label={`Remove ${a.name}`}>
+                    ×
+                  </button>
+                </div>
+              ))}
+              <label className="btn ghost" style={{ margin: '8px 0 0' }}>
+                {uploading ? 'Uploading…' : 'Attach files'}
+                <input type="file" multiple hidden onChange={(e) => attach(e.target.files)} />
+              </label>
+              <p className="muted" style={{ margin: '8px 0 0' }}>
+                Up to 5 files, 10 MB in total.
+              </p>
+            </div>
+            <div className="panel-sec">
+              <div className="panel-label">Test recipients</div>
+              <input value={testTo} onChange={(e) => setTestTo(e.target.value)} placeholder="you@example.com, teammate@example.com" />
+              <button className="ghost" style={{ marginTop: 8 }} disabled={busy} onClick={sendTest}>
+                Send test
+              </button>
+            </div>
+            <div className="panel-sec">
+              <div className="panel-label">This email</div>
+              <div className="row">
+                <button className="ghost" onClick={saveTemplate}>
+                  Save as template
+                </button>
+                {draftId && (
+                  <button className="danger" onClick={discard}>
+                    Delete draft
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </aside>
+      )}
+
+      {dialog && (
+        <div className="modal-back" onMouseDown={() => !busy && setDialog(false)}>
+          <div className="modal card" role="dialog" aria-modal="true" aria-labelledby="send-title" onMouseDown={(e) => e.stopPropagation()}>
+            <div className="ws-panel-head">
+              <h2 id="send-title">Send “{content.subject || '(no subject)'}”</h2>
+              <button type="button" className="icon-btn" onClick={() => setDialog(false)} aria-label="Close">
+                ×
+              </button>
+            </div>
+            <div className="modal-body">
+              <div className="kv">
+                <div className="k">Recipients</div>
+                <div>
+                  <strong>{count}</strong>
+                  {preview && preview.suppressed + preview.optedOut > 0 && <span className="muted"> · {preview.suppressed + preview.optedOut} skipped</span>}
+                </div>
+                <div className="k">Format</div>
+                <div>
+                  {content.format === 'text' ? 'Plain text' : 'HTML'}
+                  {attachments.length ? ` · ${attachments.length} attachment${attachments.length > 1 ? 's' : ''}` : ''}
+                </div>
+                <div className="k">From</div>
+                <div>{props.fromLine}</div>
+              </div>
+
+              {errors.length > 0 && (
+                <div className="notice bad-notice">
+                  {errors.map((e, i) => (
+                    <div key={i}>{e.message}</div>
+                  ))}
+                </div>
+              )}
+              {warnings.length > 0 && errors.length === 0 && (
+                <div className="notice">
+                  {warnings.length} warning{warnings.length > 1 ? 's' : ''} from the checks — {warnings[0].message}
+                </div>
+              )}
+              {preview?.approvalNeeded && <div className="notice">More than {preview.approvalThreshold} recipients: an admin must approve before it goes out.</div>}
+              {preview && count > preview.remainingToday && (
+                <div className="notice">
+                  Today’s limit allows {preview.remainingToday} more of {preview.dailyLimit}. The rest will continue automatically after midnight.
+                </div>
+              )}
+
+              <div className="when">
+                <label className="check-row opt">
+                  <input type="radio" checked={when === 'now'} onChange={() => setWhen('now')} />
+                  <span>Send now</span>
+                </label>
+                <label className="check-row opt">
+                  <input type="radio" checked={when === 'later'} onChange={() => setWhen('later')} />
+                  <span style={{ flex: 1 }}>
+                    Schedule
+                    {when === 'later' && <input type="datetime-local" value={at} min={localInput(new Date(Date.now() + 5 * 60_000))} onChange={(e) => setAt(e.target.value)} style={{ marginTop: 8 }} />}
+                  </span>
+                </label>
+              </div>
+            </div>
+            <div className="modal-foot">
+              <button className="ghost" onClick={() => setDialog(false)} disabled={busy}>
+                Cancel
+              </button>
+              <button onClick={submit} disabled={busy || errors.length > 0 || count === 0 || (when === 'later' && new Date(at).getTime() < Date.now() + 60_000)}>
+                {busy ? 'Working…' : when === 'later' ? 'Schedule' : `Send to ${count}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
