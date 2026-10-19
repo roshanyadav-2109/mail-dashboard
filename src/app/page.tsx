@@ -3,11 +3,12 @@ import Link from 'next/link'
 import { db } from '@/lib/db'
 import { requireUser } from '@/lib/guard'
 
-import PageHead from './page-head'
+import Icon from './icons'
+import SearchTrigger from './search-trigger'
 
 export const dynamic = 'force-dynamic'
 
-type Row = {
+type Campaign = {
   id: string
   subject: string
   created_at: string
@@ -16,51 +17,109 @@ type Row = {
   delivered: number
   bounced: number
   complained: number
-  failed: number
-  suppressed: number
   pending: number
-  opened: number
 }
+type List = { id: string; name: string; emails: string[] }
+type Event = { id: number; event_type: string; email: string | null; created_at: string }
 
 const pct = (n: number, d: number) => (d ? `${((n / d) * 100).toFixed(1)}%` : '—')
+const ago = (iso: string) => {
+  const s = Math.max(1, Math.round((Date.now() - new Date(iso).getTime()) / 1000))
+  if (s < 60) return `${s}s ago`
+  if (s < 3600) return `${Math.round(s / 60)}m ago`
+  if (s < 86400) return `${Math.round(s / 3600)}h ago`
+  return `${Math.round(s / 86400)}d ago`
+}
 
-export default async function Overview() {
+function Column({ title, href, children }: { title: string; href?: string; children: React.ReactNode }) {
+  return (
+    <div className="home-col">
+      <div className="home-col-head">
+        {href ? (
+          <Link href={href}>
+            {title} <Icon name="chevron" size={13} />
+          </Link>
+        ) : (
+          <span>{title}</span>
+        )}
+      </div>
+      {children}
+    </div>
+  )
+}
+
+function Row({ href, icon, children }: { href: string; icon: 'campaigns' | 'users' | 'history'; children: React.ReactNode }) {
+  return (
+    <Link href={href} className="home-row">
+      <Icon name={icon} />
+      <span className="home-row-text">{children}</span>
+      <Icon name="chevron" size={14} />
+    </Link>
+  )
+}
+
+export default async function Home() {
   await requireUser()
   const sb = db()
-  const { data } = await sb.from('campaign_stats').select('*').order('created_at', { ascending: false }).limit(1000)
-  const rows = (data ?? []) as Row[]
-  const { count: suppressions } = await sb.from('suppressions').select('email', { count: 'exact', head: true })
+  const [{ data: c }, { data: l }, { data: e }] = await Promise.all([
+    sb.from('campaign_stats').select('*').order('created_at', { ascending: false }).limit(200),
+    sb.from('saved_lists').select('id, name, emails').order('created_at', { ascending: false }).limit(3),
+    sb.from('ses_events').select('id, event_type, email, created_at').order('id', { ascending: false }).limit(5),
+  ])
+  const campaigns = (c ?? []) as Campaign[]
+  const lists = (l ?? []) as List[]
+  const events = (e ?? []) as Event[]
 
-  const sum = (k: keyof Row) => rows.reduce((a, r) => a + Number(r[k] ?? 0), 0)
+  const sum = (k: keyof Campaign) => campaigns.reduce((a, r) => a + Number(r[k] ?? 0), 0)
   const sent = sum('sent')
 
   return (
-    <>
-      <PageHead
-        title="Overview"
-        description="Delivery performance across all campaigns."
-        actions={
-          <Link className="btn" href="/compose">
-            New campaign
-          </Link>
-        }
-      />
+    <div className="home">
+      <a className="pill-banner" href="/settings">
+        Sending as <strong>mail@unknowniitians.in</strong>
+        <span className="dot ok" style={{ margin: '0 0 0 4px' }} />
+      </a>
 
-      <div className="kpis">
+      <h1 className="hero">What&apos;s on the agenda?</h1>
+      <SearchTrigger />
+
+      <div className="home-cols">
+        <Column title="Campaigns" href="/campaigns">
+          {campaigns.length === 0 && <div className="home-empty">No campaigns yet</div>}
+          {campaigns.slice(0, 3).map((x) => (
+            <Row key={x.id} href={`/campaigns/${x.id}`} icon="campaigns">
+              {x.subject}
+            </Row>
+          ))}
+        </Column>
+        <Column title="Contact lists" href="/lists">
+          {lists.length === 0 && <div className="home-empty">No saved lists yet</div>}
+          {lists.map((x) => (
+            <Row key={x.id} href="/lists" icon="users">
+              {x.name} <span className="muted">· {x.emails.length}</span>
+            </Row>
+          ))}
+        </Column>
+        <Column title="Recent activity">
+          {events.length === 0 && <div className="home-empty">Delivery events will appear here</div>}
+          {events.map((x) => (
+            <Row key={x.id} href="/campaigns" icon="history">
+              <span className="muted">{x.event_type}</span> / {x.email ?? '—'} <span className="muted">· {ago(x.created_at)}</span>
+            </Row>
+          ))}
+        </Column>
+      </div>
+
+      <div className="kpis" style={{ marginTop: 36 }}>
         <div className="card kpi">
           <div className="label">Campaigns</div>
-          <div className="value">{rows.length}</div>
-          <div className="sub">{sum('total')} recipients in total</div>
-        </div>
-        <div className="card kpi">
-          <div className="label">Emails sent</div>
-          <div className="value">{sent}</div>
-          <div className="sub">{sum('pending')} pending</div>
+          <div className="value">{campaigns.length}</div>
+          <div className="sub">{sum('total')} recipients</div>
         </div>
         <div className="card kpi">
           <div className="label">Delivery rate</div>
           <div className="value">{pct(sum('delivered'), sent)}</div>
-          <div className="sub">{sum('delivered')} delivered</div>
+          <div className="sub">{sum('delivered')} of {sent} sent</div>
         </div>
         <div className="card kpi">
           <div className="label">Bounce rate</div>
@@ -72,55 +131,20 @@ export default async function Overview() {
           <div className="value">{pct(sum('complained'), sent)}</div>
           <div className="sub">{sum('complained')} complaints</div>
         </div>
-        <div className="card kpi">
-          <div className="label">Suppressed addresses</div>
-          <div className="value">{suppressions ?? 0}</div>
-          <div className="sub">never emailed</div>
-        </div>
       </div>
 
-      <div className="card">
-        <div className="card-head">
-          <h2>Recent campaigns</h2>
-          <Link className="link" href="/campaigns">
-            View all
+      <div className="banner">
+        <div className="banner-art" />
+        <div className="banner-body">
+          <div>
+            <h3>Bounce and complaint protection is on</h3>
+            <p>Hard bounces, spam complaints and unsubscribes are suppressed automatically so you never email them again.</p>
+          </div>
+          <Link className="btn banner-btn" href="/suppressions">
+            View suppressions
           </Link>
         </div>
-        {rows.length === 0 ? (
-          <div className="empty">No campaigns yet. Create your first one from Compose.</div>
-        ) : (
-          <div className="scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>Subject</th>
-                  <th>Date</th>
-                  <th className="num">Recipients</th>
-                  <th className="num">Delivered</th>
-                  <th className="num">Bounced</th>
-                  <th className="num">Pending</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.slice(0, 6).map((r) => (
-                  <tr key={r.id}>
-                    <td>
-                      <Link className="link" href={`/campaigns/${r.id}`}>
-                        {r.subject}
-                      </Link>
-                    </td>
-                    <td>{new Date(r.created_at).toLocaleString('en-IN')}</td>
-                    <td className="num">{r.total}</td>
-                    <td className="num">{r.delivered}</td>
-                    <td className="num">{r.bounced}</td>
-                    <td className="num">{r.pending}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
       </div>
-    </>
+    </div>
   )
 }
