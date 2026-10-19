@@ -73,32 +73,22 @@ export default async function Campaign({
       <PageHead
         title={campaign.subject}
         description={`${campaign.format === 'text' ? 'Plain text' : 'HTML'} email · sent by ${campaign.created_by} on ${new Date(campaign.created_at).toLocaleString('en-IN')}`}
-        crumbs={[{ href: '/', name: 'Overview' }, { href: '/campaigns', name: 'Campaigns' }, { name: 'Details' }]}
+        crumbs={[{ href: '/', name: 'Account home' }, { href: '/campaigns', name: 'Campaigns' }, { name: 'Details' }]}
+        actions={<Runner id={id} pending={pending} failed={counts.failed ?? 0} autostart={run === '1'} />}
       />
 
+      {/* One card: the summary strip on top, the recipients table directly below it. */}
       <div className="card">
-        <div className="card-head">
-          <h2>Delivery summary</h2>
-          <Runner id={id} pending={pending} failed={counts.failed ?? 0} autostart={run === '1'} />
+        <div className="stats flush">
+          {tiles.map(([label, value]) => (
+            <div className="stat" key={label}>
+              <b>{value}</b>
+              <span>{label}</span>
+            </div>
+          ))}
         </div>
-        <div className="card-body">
-          <div className="stats" style={{ margin: 0 }}>
-            {tiles.map(([label, value]) => (
-              <div className="stat" key={label}>
-                <b>{value}</b>
-                <span>{label}</span>
-              </div>
-            ))}
-          </div>
-          <p className="muted" style={{ marginBottom: 0 }}>
-            Open counts need open tracking on the SES configuration set and are approximate. Skipped = suppressed addresses.
-          </p>
-        </div>
-      </div>
 
-      <div className="card" style={{ marginTop: 16 }}>
-        <div className="card-head">
-          <h2>Recipients</h2>
+        <div className="card-head" style={{ borderTop: '1px solid var(--line)' }}>
           <div className="pills">
             <Link className={`pill${!status ? ' on' : ''}`} href={`/campaigns/${id}`}>
               All ({total})
@@ -109,7 +99,9 @@ export default async function Campaign({
               </Link>
             ))}
           </div>
+          <span className="muted">Open counts need open tracking and are approximate</span>
         </div>
+
         <div className="scroll">
           <table>
             <thead>

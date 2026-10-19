@@ -229,14 +229,53 @@ iframe { width: 100%; height: 380px; border: 1px solid var(--line); border-radiu
   .hero { font-size: 28px }
 }
 
-/* ── Compose: editor on the left, sticky preview side panel on the right ── */
-.compose { display: grid; grid-template-columns: minmax(0, 1fr) 440px; gap: 16px; align-items: start }
-.preview-panel { position: sticky; top: 84px; display: flex; flex-direction: column; max-height: calc(100vh - 104px); overflow: hidden }
-.preview-panel .pill { cursor: pointer; font: inherit; font-size: 13px; padding: 4px 12px; color: var(--text-2); background: #fff; border: 1px solid var(--line-strong) }
-.preview-panel .pill.on { background: var(--accent-soft); border-color: transparent; color: var(--accent) }
-.inbox-head { padding: 12px 20px; border-bottom: 1px solid var(--line); font-size: 13px; display: grid; gap: 2px }
+/* ── Workspace: one main area + collapsible right panel ── */
+.workspace { display: flex; gap: 16px; align-items: flex-start }
+.ws-main { flex: 1; min-width: 0 }
+.ws-panel { width: 360px; flex: none; position: sticky; top: 84px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); max-height: calc(100vh - 104px); display: flex; flex-direction: column; overflow: hidden }
+.ws-panel-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--line) }
+.ws-panel-head h2 { margin: 0; font-size: 15px }
+.ws-panel-body { overflow-y: auto; flex: 1 }
+.panel-sec { display: block; padding: 16px; border-bottom: 1px solid var(--line) }
+.panel-sec:last-child { border-bottom: 0 }
+.panel-label { font-size: 12.5px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 8px }
+.icon-btn { font-size: 20px; line-height: 1 }
+.stats.flush { border: 0; border-radius: 0; margin: 0 }
+.stats.flush .stat { border-bottom: 0 }
+
+/* ── Compose: a single full-height workspace ── */
+.composer { display: flex; flex-direction: column; height: calc(100vh - 124px); margin-bottom: -40px; min-height: 560px; position: relative; overflow: hidden }
+.c-top { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--line) }
+.subject { flex: 1; min-width: 0; border: 0; outline: none; font-size: 18px; font-weight: 600; letter-spacing: -.02em; padding: 6px 2px; background: transparent }
+.subject:focus { outline: none; border: 0 }
+.c-to { display: flex; align-items: center; gap: 10px; padding: 8px 16px; border-bottom: 1px solid var(--line); min-height: 52px }
+.to-chips { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 6px; align-items: center }
+.c-body { flex: 1; min-height: 0; display: flex; position: relative }
+.c-editor { flex: 1; min-width: 0; display: flex; flex-direction: column }
+.tabbar { display: flex; align-items: center; gap: 4px; padding: 0 12px 0 16px; height: 46px; border-bottom: 1px solid var(--line); flex: none }
+.tab { background: none; border: 0; border-bottom: 2px solid transparent; border-radius: 0; color: var(--muted); padding: 13px 10px 11px; font-weight: 500 }
+.tab:hover { background: none; color: var(--text) }
+.tab.on { color: var(--text); border-bottom-color: var(--accent) }
+.editor { flex: 1; width: 100%; border: 0; border-radius: 0; outline: none; padding: 16px; resize: none; line-height: 1.6 }
+.editor:focus { outline: none }
+.editor.plain { font-family: inherit; font-size: 14px }
+.c-preview { width: 44%; min-width: 340px; flex: none; display: flex; flex-direction: column; border-left: 1px solid var(--line); background: var(--bg) }
+.c-preview .tabbar { background: var(--surface) }
+.inbox-head { padding: 10px 16px; border-bottom: 1px solid var(--line); font-size: 13px; background: var(--surface) }
 .inbox-head .muted { display: inline-block; width: 40px }
-.inbox-subject { font-weight: 600; font-size: 15px; margin-top: 6px }
-.preview-stage { flex: 1; min-height: 360px; overflow: auto; background: var(--bg); padding: 16px; display: flex; justify-content: center }
-.preview-stage iframe { height: 100%; min-height: 420px; max-width: 100%; border-radius: 8px; border: 1px solid var(--line); background: #fff }
-@media (max-width: 1200px) { .compose { grid-template-columns: 1fr } .preview-panel { position: static; max-height: none } }
+.inbox-subject { font-weight: 600; font-size: 15px; margin-top: 4px }
+.preview-stage { flex: 1; min-height: 0; overflow: auto; padding: 16px; display: flex; justify-content: center }
+.preview-stage iframe { height: 100%; min-height: 300px; max-width: 100%; border-radius: 8px; border: 1px solid var(--line); background: #fff }
+.drawer { position: absolute; top: 0; right: 0; bottom: 0; width: 400px; max-width: 100%; background: var(--surface); border-left: 1px solid var(--line); box-shadow: -12px 0 28px rgba(0, 0, 0, .07); display: flex; flex-direction: column; z-index: 5 }
+.pill { cursor: pointer; font: inherit; font-size: 13px }
+button.pill { color: var(--text-2); background: #fff; border: 1px solid var(--line-strong); padding: 4px 12px }
+button.pill:hover { background: var(--hover) }
+button.pill.on { background: var(--accent-soft); border-color: transparent; color: var(--accent) }
+@media (max-width: 1100px) {
+  .composer { height: auto }
+  .c-body { flex-direction: column }
+  .c-preview { width: auto; border-left: 0; border-top: 1px solid var(--line) }
+  .editor { min-height: 320px }
+  .workspace { flex-direction: column }
+  .ws-panel { width: 100%; position: static; max-height: none }
+}
