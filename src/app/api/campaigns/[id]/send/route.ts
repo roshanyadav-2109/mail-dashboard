@@ -20,7 +20,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     .eq('status', 'sending')
     .lt('updated_at', new Date(Date.now() - 5 * 60_000).toISOString())
 
-  const { data: campaign } = await sb.from('campaigns').select('subject, html').eq('id', id).single()
+  const { data: campaign } = await sb.from('campaigns').select('subject, html, format').eq('id', id).single()
   if (!campaign) return Response.json({ error: 'campaign not found' }, { status: 404 })
 
   const { data: queued } = await sb.from('messages').select('id').eq('campaign_id', id).eq('status', 'queued').limit(BATCH)
@@ -34,7 +34,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
 
   for (const message of (claimed ?? []) as { id: string; email: string }[]) {
     try {
-      const sesId = await sendOne({ to: message.email, subject: campaign.subject, html: campaign.html, campaignId: id })
+      const sesId = await sendOne({ to: message.email, subject: campaign.subject, html: campaign.html, format: campaign.format, campaignId: id })
       await sb.from('messages').update({ ses_message_id: sesId, sent_at: new Date().toISOString() }).eq('id', message.id)
       // Only move forward from 'sending': a delivery event may already have advanced the status.
       await sb

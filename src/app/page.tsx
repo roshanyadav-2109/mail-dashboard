@@ -19,7 +19,7 @@ type Campaign = {
   complained: number
   pending: number
 }
-type List = { id: string; name: string; emails: string[] }
+type Group = { id: string; name: string; emails: string[] }
 type Event = { id: number; event_type: string; email: string | null; created_at: string }
 
 const pct = (n: number, d: number) => (d ? `${((n / d) * 100).toFixed(1)}%` : '—')
@@ -63,11 +63,11 @@ export default async function Home() {
   const sb = db()
   const [{ data: c }, { data: l }, { data: e }] = await Promise.all([
     sb.from('campaign_stats').select('*').order('created_at', { ascending: false }).limit(200),
-    sb.from('saved_lists').select('id, name, emails').order('created_at', { ascending: false }).limit(3),
+    sb.from('groups').select('id, name, emails').order('created_at', { ascending: false }).limit(3),
     sb.from('ses_events').select('id, event_type, email, created_at').order('id', { ascending: false }).limit(5),
   ])
   const campaigns = (c ?? []) as Campaign[]
-  const lists = (l ?? []) as List[]
+  const groups = (l ?? []) as Group[]
   const events = (e ?? []) as Event[]
 
   const sum = (k: keyof Campaign) => campaigns.reduce((a, r) => a + Number(r[k] ?? 0), 0)
@@ -92,10 +92,10 @@ export default async function Home() {
             </Row>
           ))}
         </Column>
-        <Column title="Contact lists" href="/lists">
-          {lists.length === 0 && <div className="home-empty">No saved lists yet</div>}
-          {lists.map((x) => (
-            <Row key={x.id} href="/lists" icon="users">
+        <Column title="Groups" href="/groups">
+          {groups.length === 0 && <div className="home-empty">No groups yet</div>}
+          {groups.map((x) => (
+            <Row key={x.id} href={`/groups/${x.id}`} icon="users">
               {x.name} <span className="muted">· {x.emails.length}</span>
             </Row>
           ))}

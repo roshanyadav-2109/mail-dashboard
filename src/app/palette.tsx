@@ -9,7 +9,7 @@ const ITEMS: { name: string; href: string; icon: IconName; hint: string }[] = [
   { name: 'Account home', href: '/', icon: 'home', hint: 'Overview' },
   { name: 'Compose a new campaign', href: '/compose', icon: 'send', hint: 'Email' },
   { name: 'Campaigns', href: '/campaigns', icon: 'campaigns', hint: 'Email' },
-  { name: 'Contact lists', href: '/lists', icon: 'users', hint: 'Email' },
+  { name: 'Groups', href: '/groups', icon: 'users', hint: 'Email' },
   { name: 'Suppressions', href: '/suppressions', icon: 'ban', hint: 'Protect & deliver' },
   { name: 'Settings', href: '/settings', icon: 'settings', hint: 'Protect & deliver' },
 ]

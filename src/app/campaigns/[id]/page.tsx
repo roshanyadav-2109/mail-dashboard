@@ -72,7 +72,7 @@ export default async function Campaign({
     <>
       <PageHead
         title={campaign.subject}
-        description={`Sent by ${campaign.created_by} on ${new Date(campaign.created_at).toLocaleString('en-IN')}`}
+        description={`${campaign.format === 'text' ? 'Plain text' : 'HTML'} email · sent by ${campaign.created_by} on ${new Date(campaign.created_at).toLocaleString('en-IN')}`}
         crumbs={[{ href: '/', name: 'Overview' }, { href: '/campaigns', name: 'Campaigns' }, { name: 'Details' }]}
       />
 

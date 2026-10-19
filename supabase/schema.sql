@@ -6,6 +6,7 @@ create table if not exists campaigns (
   id uuid primary key default gen_random_uuid(),
   subject text not null,
   html text not null,
+  format text not null default 'html' check (format in ('html','text')),
   created_by text not null,
   created_at timestamptz not null default now()
 );
@@ -48,11 +49,13 @@ create table if not exists ses_events (
 );
 create index if not exists ses_events_msg_idx on ses_events (ses_message_id);
 
-create table if not exists saved_lists (
+create table if not exists groups (
   id uuid primary key default gen_random_uuid(),
   name text not null unique,
+  description text not null default '',
   emails text[] not null default '{}',
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
 );
 
 create or replace view campaign_stats as
@@ -75,4 +78,4 @@ alter table campaigns enable row level security;
 alter table messages enable row level security;
 alter table suppressions enable row level security;
 alter table ses_events enable row level security;
-alter table saved_lists enable row level security;
+alter table groups enable row level security;

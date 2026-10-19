@@ -3,16 +3,17 @@ import { requireUser } from '@/lib/guard'
 import PageHead from '../page-head'
 import Composer from './composer'
 
-export default async function Compose() {
+export default async function Compose({ searchParams }: { searchParams: Promise<{ group?: string }> }) {
   await requireUser()
+  const { group } = await searchParams
   return (
     <>
       <PageHead
         title="Compose"
-        description="Write an HTML email, choose recipients and send. Sent from mail@unknowniitians.in."
-        crumbs={[{ href: '/', name: 'Overview' }, { name: 'Compose' }]}
+        description="Pick groups, write an HTML or plain-text email and send. Sent from mail@unknowniitians.in."
+        crumbs={[{ href: '/', name: 'Account home' }, { name: 'Compose' }]}
       />
-      <Composer />
+      <Composer initialGroup={group} />
     </>
   )
 }

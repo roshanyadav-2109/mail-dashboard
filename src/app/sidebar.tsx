@@ -13,7 +13,7 @@ const GROUPS: { label?: string; items: { href: string; name: string; icon: IconN
     items: [
       { href: '/compose', name: 'Compose', icon: 'send' },
       { href: '/campaigns', name: 'Campaigns', icon: 'campaigns' },
-      { href: '/lists', name: 'Contact lists', icon: 'users' },
+      { href: '/groups', name: 'Groups', icon: 'users' },
     ],
   },
   {

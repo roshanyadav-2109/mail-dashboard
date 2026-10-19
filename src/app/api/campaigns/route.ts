@@ -8,7 +8,12 @@ export async function POST(req: Request) {
   const user = await apiUser()
   if (!user) return Response.json({ error: 'forbidden' }, { status: 403 })
 
-  const { subject, html, recipients } = (await req.json()) as { subject: string; html: string; recipients: string[] }
+  const { subject, html, recipients, format } = (await req.json()) as {
+    subject: string
+    html: string
+    recipients: string[]
+    format?: 'html' | 'text'
+  }
   const unique = [...new Set((recipients ?? []).map((e) => String(e).trim().toLowerCase()).filter((e) => EMAIL.test(e)))]
   if (!subject?.trim() || !html?.trim() || !unique.length)
     return Response.json({ error: 'subject, html and at least one valid recipient are required' }, { status: 400 })
@@ -16,7 +21,7 @@ export async function POST(req: Request) {
   const sb = db()
   const { data: campaign, error } = await sb
     .from('campaigns')
-    .insert({ subject: subject.trim(), html, created_by: user })
+    .insert({ subject: subject.trim(), html, format: format === 'text' ? 'text' : 'html', created_by: user })
     .select('id')
     .single()
   if (error || !campaign) return Response.json({ error: error?.message ?? 'could not create campaign' }, { status: 500 })

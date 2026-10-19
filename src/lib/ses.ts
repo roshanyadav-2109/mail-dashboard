@@ -26,14 +26,21 @@ export const toText = (html: string) =>
     .replace(/\n\s*\n+/g, '\n\n')
     .trim()
 
-/** Sends one email with an unsubscribe footer and the one-click List-Unsubscribe headers. */
-export async function sendOne(opts: { to: string; subject: string; html: string; campaignId?: string }) {
+export type Format = 'html' | 'text'
+
+/**
+ * Sends one email with an unsubscribe footer and the one-click List-Unsubscribe headers.
+ * `html` holds the message body: HTML markup for format 'html', or plain text for format 'text'
+ * (plain-text messages are sent as text-only, with no HTML part).
+ */
+export async function sendOne(opts: { to: string; subject: string; html: string; format?: Format; campaignId?: string }) {
   const token = makeToken(opts.to)
   const pageUrl = `${appUrl()}/unsubscribe/${token}`
   const oneClickUrl = `${appUrl()}/api/unsubscribe/${token}`
+  const isText = opts.format === 'text'
   const footer = `<p style="font:12px Arial,sans-serif;color:#888;text-align:center;margin:24px 0">You received this email because your address is on our list. <a href="${pageUrl}" style="color:#888">Unsubscribe</a></p>`
   const html = /<\/body>/i.test(opts.html) ? opts.html.replace(/<\/body>/i, `${footer}</body>`) : opts.html + footer
-  const text = `${toText(opts.html)}\n\n--\nUnsubscribe: ${pageUrl}`
+  const text = `${isText ? opts.html.trim() : toText(opts.html)}\n\n--\nUnsubscribe: ${pageUrl}`
 
   const res = await client.send(
     new SendEmailCommand({
@@ -44,7 +51,9 @@ export async function sendOne(opts: { to: string; subject: string; html: string;
       Content: {
         Simple: {
           Subject: { Data: opts.subject, Charset: 'UTF-8' },
-          Body: { Html: { Data: html, Charset: 'UTF-8' }, Text: { Data: text, Charset: 'UTF-8' } },
+          Body: isText
+            ? { Text: { Data: text, Charset: 'UTF-8' } }
+            : { Html: { Data: html, Charset: 'UTF-8' }, Text: { Data: text, Charset: 'UTF-8' } },
           Headers: [
             { Name: 'List-Unsubscribe', Value: `<${oneClickUrl}>` },
             { Name: 'List-Unsubscribe-Post', Value: 'List-Unsubscribe=One-Click' },
