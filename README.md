@@ -68,3 +68,8 @@ npm install
 npm run dev
 ```
 SNS cannot reach localhost, so bounce/complaint events only arrive on the deployed app.
+
+## Credits
+- Typeface: [Inter](https://rsms.me/inter/) (SIL Open Font License 1.1), self-hosted in `public/fonts/`.
+- Icons: [Solar icon set](https://icon-sets.iconify.design/solar/) by 480 Design (CC BY 4.0), inlined in `src/app/icons.tsx`.
+- Colours and type settings follow Cloudflare's [Kumo](https://github.com/cloudflare/kumo) light theme.

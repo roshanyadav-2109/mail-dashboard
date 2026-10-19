@@ -1,14 +1,10 @@
 import './globals.css'
 
-import { Inter } from 'next/font/google'
-
 import { allowed, auth, signOut } from '@/auth'
 
 import Icon from './icons'
 import Palette from './palette'
 import Sidebar from './sidebar'
-
-const inter = Inter({ subsets: ['latin'] })
 
 export const metadata = { title: 'Mail Dashboard' }
 
@@ -17,7 +13,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 
   return (
     <html lang="en">
-      <body className={inter.className}>
+      <body>
         {email && allowed(email) ? (
           <div className="shell">
             <Sidebar email={email} />
