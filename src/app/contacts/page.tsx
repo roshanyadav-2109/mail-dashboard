@@ -20,10 +20,11 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 type Row = { id: string; email: string; name: string; tags: string[]; source: string; created_at: string }
 
-export default async function Contacts({ searchParams }: { searchParams: Promise<{ q?: string; tag?: string; page?: string }> }) {
+export default async function Contacts({ searchParams }: { searchParams: Promise<{ q?: string; tag?: string; kind?: string; page?: string }> }) {
   const me = await requireRole('viewer')
   const canEdit = atLeast(me.role, 'sender')
-  const { q, tag, page } = await searchParams
+  const { q, tag, page, kind: rawKind } = await searchParams
+  const kind = rawKind === 'number' || rawKind === 'other' ? rawKind : undefined
   const p = Math.max(0, Number(page ?? 0) || 0)
   const sb = db()
 
@@ -31,6 +32,9 @@ export default async function Contacts({ searchParams }: { searchParams: Promise
   const needle = q?.trim().replace(/[%,()]/g, '')
   if (needle) query = query.or(`email.ilike.%${needle}%,name.ilike.%${needle}%`)
   if (tag) query = query.contains('tags', [tag])
+  // Address shape: student IDs start with a number; anything else (role mailboxes like house-sec@) shows up under "other".
+  if (kind === 'number') query = query.filter('email', 'match', '^[0-9]')
+  if (kind === 'other') query = query.not('email', 'match', '^[0-9]')
   const { data, count } = await query.range(p * PAGE, p * PAGE + PAGE - 1)
   const rows = (data ?? []) as Row[]
   const total = count ?? 0
@@ -41,10 +45,12 @@ export default async function Contacts({ searchParams }: { searchParams: Promise
   tagRows.forEach((r) => r.tags.forEach((t) => tagCounts.set(t, (tagCounts.get(t) ?? 0) + 1)))
   const tags = [...tagCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 30)
 
+  const { count: otherCount } = await sb.from('contacts').select('id', { count: 'exact', head: true }).not('email', 'match', '^[0-9]')
+
   const { data: groups } = await sb.from('groups').select('id, name').order('name')
   const qs = (patch: Record<string, string | undefined>) => {
     const params = new URLSearchParams()
-    const merged = { q, tag, page: undefined, ...patch }
+    const merged = { q, tag, kind, page: undefined, ...patch }
     Object.entries(merged).forEach(([k, v]) => v && params.set(k, v))
     const s = params.toString()
     return s ? `?${s}` : '/contacts'
@@ -62,6 +68,7 @@ export default async function Contacts({ searchParams }: { searchParams: Promise
         <form className="row">
           <input name="q" defaultValue={q} placeholder="Search email or name" style={{ width: 240 }} />
           {tag && <input type="hidden" name="tag" value={tag} />}
+          {kind && <input type="hidden" name="kind" value={kind} />}
           <button className="ghost" type="submit">
             Search
           </button>
@@ -152,6 +159,17 @@ export default async function Contacts({ searchParams }: { searchParams: Promise
           </details>
         </div>
       )}
+      <div className="card-head pills" style={{ justifyContent: 'flex-start' }}>
+        <Link className={`pill${!kind ? ' on' : ''}`} href={qs({ kind: undefined })}>
+          Any address
+        </Link>
+        <Link className={`pill${kind === 'number' ? ' on' : ''}`} href={qs({ kind: 'number' })}>
+          Starts with a number
+        </Link>
+        <Link className={`pill${kind === 'other' ? ' on' : ''}`} href={qs({ kind: 'other' })} title="Addresses that don't start with a number, e.g. role mailboxes like house-sec@">
+          Doesn’t start with a number · {otherCount ?? 0}
+        </Link>
+      </div>
       {tags.length > 0 && (
         <div className="card-head pills" style={{ justifyContent: 'flex-start' }}>
           <Link className={`pill${!tag ? ' on' : ''}`} href={qs({ tag: undefined })}>
@@ -165,7 +183,7 @@ export default async function Contacts({ searchParams }: { searchParams: Promise
         </div>
       )}
       {rows.length === 0 ? (
-        <div className="empty">{q || tag ? 'No contacts match.' : 'No contacts yet. Add or import some.'}</div>
+        <div className="empty">{q || tag || kind ? 'No contacts match.' : 'No contacts yet. Add or import some.'}</div>
       ) : (
         <div className="scroll">
           <table>
