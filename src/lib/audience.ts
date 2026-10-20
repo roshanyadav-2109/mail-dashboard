@@ -1,4 +1,6 @@
 import { db } from '@/lib/db'
+import { matchesDomain } from '@/lib/domains'
+import { getSettings } from '@/lib/settings'
 
 export type Contact = {
   id: string
@@ -10,8 +12,8 @@ export type Contact = {
   created_at: string
 }
 
-export type Audience = { groups: string[]; segments: string[]; emails: string[]; exclude?: string[] }
-export const EMPTY_AUDIENCE: Audience = { groups: [], segments: [], emails: [], exclude: [] }
+export type Audience = { groups: string[]; segments: string[]; emails: string[]; exclude?: string[]; excludeDomains?: string[] }
+export const EMPTY_AUDIENCE: Audience = { groups: [], segments: [], emails: [], exclude: [], excludeDomains: [] }
 
 export type Condition =
   | { type: 'tag'; op: 'has' | 'not_has'; value: string }
@@ -175,6 +177,8 @@ export type Resolved = {
   emails: string[]
   suppressed: string[]
   optedOut: string[]
+  /** Left out because their domain is excluded (for this send, or always in Settings). */
+  domainExcluded: string[]
 }
 
 /**
@@ -207,7 +211,10 @@ export async function resolveAudience(audience: Audience): Promise<Resolved> {
     const { data } = await sb.from('suppressions').select('email').in('email', part)
     data?.forEach((r: { email: string }) => blocked.add(r.email))
   }
-  return { emails: all.filter((e) => !blocked.has(e)), suppressed: [...blocked], optedOut: [...optedOut] }
+  const patterns = [...(audience.excludeDomains ?? []), ...(await getSettings()).excluded_domains]
+  const domainExcluded = patterns.length ? all.filter((e) => !blocked.has(e) && matchesDomain(e, patterns)) : []
+  const dropped = new Set(domainExcluded)
+  return { emails: all.filter((e) => !blocked.has(e) && !dropped.has(e)), suppressed: [...blocked], optedOut: [...optedOut], domainExcluded }
 }
 
 /** Gmail ignores dots and "+tags"; other providers only "+tags". Used to find likely duplicates. */

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 
 import type { Audience } from '@/lib/audience'
 import type { CalendarEvent } from '@/lib/calendar'
+import { parsePatterns } from '@/lib/domains'
 import type { Content } from '@/lib/content'
 import { lint } from '@/lib/lint'
 import { SAMPLE, type MergeData } from '@/lib/render'
@@ -29,6 +30,8 @@ type Preview = {
   approvalNeeded: boolean
   approvalThreshold: number
   sample: MergeData | null
+  domainExcluded: number
+  domains: { domain: string; count: number }[]
 }
 
 /** Local datetime value for <input type="datetime-local">. */
@@ -59,6 +62,27 @@ export default function Composer(props: {
   const [preview, setPreview] = useState<Preview | null>(null)
   const [drawer, setDrawer] = useState<'recipients' | 'options' | null>(null)
   const [dialog, setDialog] = useState(false)
+  const [domainInput, setDomainInput] = useState('')
+  type RiskData = { total: number; quality: { email: string; reason: string; suggestion?: string }[]; softBounced: string[]; inactive: string[]; fresh: string[] }
+  const [risk, setRisk] = useState<RiskData | null>(null)
+  const [skip, setSkip] = useState({ quality: true, soft: true, inactive: false, fresh: false })
+  useEffect(() => {
+    if (!dialog) return
+    setRisk(null)
+    fetch('/api/audience/risk', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ audience }) })
+      .then((r) => (r.ok ? r.json() : null))
+      .then(setRisk)
+      .catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dialog])
+  const skipList = risk
+    ? [
+        ...(skip.quality ? risk.quality.map((q) => q.email) : []),
+        ...(skip.soft ? risk.softBounced : []),
+        ...(skip.inactive ? risk.inactive : []),
+        ...(skip.fresh ? risk.fresh : []),
+      ]
+    : []
   const [save, setSave] = useState<{ state: 'idle' | 'saving' | 'saved' | 'error'; at?: string; msg?: string }>({ state: props.draftId ? 'saved' : 'idle' })
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
@@ -227,6 +251,11 @@ export default function Composer(props: {
       setBusy(false)
       return
     }
+    if (skipList.length) {
+      const next = { ...audience, exclude: [...new Set([...(audience.exclude ?? []), ...skipList])] }
+      setAudience(next)
+      await fetch(`/api/campaigns/${id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ audience: next }) })
+    }
     const res = await fetch(`/api/campaigns/${id}/submit`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -317,6 +346,7 @@ export default function Composer(props: {
             </span>
           ))}
           {audience.emails.length > 0 && <span className="chip">{audience.emails.length} addresses</span>}
+          {(audience.excludeDomains ?? []).length > 0 && <span className="chip">excluding {(audience.excludeDomains ?? []).join(', ')}</span>}
           {preview && (
             <span className="muted">
               {count} recipient{count === 1 ? '' : 's'}
@@ -404,6 +434,61 @@ export default function Composer(props: {
                   />
                 </label>
               </div>
+            </div>
+            <div className="panel-sec">
+              <div className="panel-label">Exclude domains</div>
+              {(preview?.domains ?? []).length > 0 && (
+                <div className="domain-list">
+                  {(preview?.domains ?? []).map((d) => {
+                    const on = (audience.excludeDomains ?? []).includes(d.domain)
+                    return (
+                      <label key={d.domain} className={`domain-row${on ? ' off' : ''}`}>
+                        <input
+                          type="checkbox"
+                          checked={!on}
+                          onChange={() =>
+                            setAudience((a) => ({
+                              ...a,
+                              excludeDomains: on ? (a.excludeDomains ?? []).filter((x) => x !== d.domain) : [...(a.excludeDomains ?? []), d.domain],
+                            }))
+                          }
+                        />
+                        <span className="domain-name">{d.domain}</span>
+                        <span className="muted">{d.count}</span>
+                      </label>
+                    )
+                  })}
+                </div>
+              )}
+              <div className="row" style={{ marginTop: 8 }}>
+                <input value={domainInput} onChange={(e) => setDomainInput(e.target.value)} placeholder="Exclude e.g. yahoo.com, *.edu" style={{ flex: 1 }} />
+                <button
+                  className="ghost"
+                  onClick={() => {
+                    const add = parsePatterns(domainInput)
+                    if (add.length) setAudience((a) => ({ ...a, excludeDomains: [...new Set([...(a.excludeDomains ?? []), ...add])] }))
+                    setDomainInput('')
+                  }}
+                >
+                  Exclude
+                </button>
+              </div>
+              {(audience.excludeDomains ?? []).filter((p) => !(preview?.domains ?? []).some((d) => d.domain === p)).length > 0 && (
+                <div className="chips">
+                  {(audience.excludeDomains ?? [])
+                    .filter((p) => !(preview?.domains ?? []).some((d) => d.domain === p))
+                    .map((p) => (
+                      <span className="chip" key={p}>
+                        {p.startsWith('.') ? `*${p}` : p} <a onClick={() => setAudience((a) => ({ ...a, excludeDomains: (a.excludeDomains ?? []).filter((x) => x !== p) }))}>×</a>
+                      </span>
+                    ))}
+                </div>
+              )}
+              {(preview?.domainExcluded ?? 0) > 0 && (
+                <p className="muted" style={{ margin: '8px 0 0' }}>
+                  {preview?.domainExcluded} left out by domain (including any set in Settings).
+                </p>
+              )}
             </div>
             <div className="panel-sec">
               <div className="row" style={{ justifyContent: 'space-between' }}>
@@ -615,6 +700,54 @@ export default function Composer(props: {
                 </div>
               )}
 
+              <div className="risk">
+                <div className="panel-label" style={{ marginBottom: 6 }}>
+                  Risk check
+                </div>
+                {!risk ? (
+                  <p className="muted" style={{ margin: 0 }}>
+                    Checking recipients…
+                  </p>
+                ) : risk.quality.length + risk.softBounced.length + risk.inactive.length + risk.fresh.length === 0 ? (
+                  <p className="good" style={{ margin: 0 }}>
+                    ✓ No risky addresses found.
+                  </p>
+                ) : (
+                  <>
+                    {(
+                      [
+                        ['quality', 'Bad addresses (typo, throwaway inbox, domain can’t receive mail)', risk.quality.map((q) => (q.suggestion ? `${q.email} → did you mean ${q.suggestion}?` : q.email))],
+                        ['soft', 'Temporarily bounced recently (inbox full, server busy)', risk.softBounced],
+                        ['inactive', 'No opens or clicks in 6 months (emailed 3+ times)', risk.inactive],
+                        ['fresh', 'Never emailed before (no history yet)', risk.fresh],
+                      ] as const
+                    )
+                      .filter(([, , list]) => list.length > 0)
+                      .map(([key, label, list]) => (
+                        <details key={key} className="risk-row">
+                          <summary>
+                            <label onClick={(e) => e.stopPropagation()}>
+                              <input type="checkbox" checked={skip[key]} onChange={(e) => setSkip((s) => ({ ...s, [key]: e.target.checked }))} /> Skip
+                            </label>
+                            <span>
+                              <b>{list.length}</b> {label}
+                            </span>
+                          </summary>
+                          <div className="risk-list">
+                            {list.slice(0, 200).map((e) => (
+                              <div key={e}>{e}</div>
+                            ))}
+                            {list.length > 200 && <div className="muted">+ {list.length - 200} more</div>}
+                          </div>
+                        </details>
+                      ))}
+                    <p className="muted" style={{ margin: '6px 0 0' }}>
+                      {skipList.length ? `${skipList.length} will be skipped — sending to ${Math.max(0, count - skipList.length)}.` : 'Nobody will be skipped.'}
+                    </p>
+                  </>
+                )}
+              </div>
+
               <div className="when">
                 <label className="check-row opt">
                   <input type="radio" checked={when === 'now'} onChange={() => setWhen('now')} />
@@ -668,7 +801,7 @@ export default function Composer(props: {
                 Cancel
               </button>
               <button onClick={submit} disabled={busy || errors.length > 0 || count === 0 || (when === 'later' && new Date(at).getTime() < Date.now() + 60_000)}>
-                {busy ? 'Working…' : when === 'later' ? 'Schedule' : when === 'smart' ? 'Send at best times' : `Send to ${count}`}
+                {busy ? 'Working…' : when === 'later' ? 'Schedule' : when === 'smart' ? 'Send at best times' : `Send to ${Math.max(0, count - skipList.length)}`}
               </button>
             </div>
           </div>

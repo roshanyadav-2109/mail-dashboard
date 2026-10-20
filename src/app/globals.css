@@ -557,3 +557,16 @@ fieldset:disabled input, fieldset:disabled select { background: var(--hover); co
 .dns-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap }
 .dns-table code { font: 12.5px ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all }
 .dns-table td, .dns-table th { padding: 8px 10px }
+/* ── Risk check + domain exclusion ── */
+.risk { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px }
+.risk-row { border-top: 1px solid var(--line); padding: 6px 0 }
+.risk-row:first-of-type { border-top: 0 }
+.risk-row summary { display: flex; gap: 10px; align-items: baseline; cursor: pointer; list-style: none }
+.risk-row summary::-webkit-details-marker { display: none }
+.risk-row summary label { display: inline-flex; align-items: center; gap: 4px; margin: 0; white-space: nowrap; color: var(--text) }
+.risk-list { max-height: 140px; overflow-y: auto; font-size: 12.5px; color: var(--text-2); padding: 6px 0 0 54px }
+.domain-list { display: grid; gap: 2px; max-height: 220px; overflow-y: auto }
+.domain-row { display: flex; align-items: center; gap: 8px; margin: 0; padding: 4px 2px; color: var(--text); font-weight: 400 }
+.domain-row input { width: 16px; height: 16px; margin: 0 }
+.domain-row .domain-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis }
+.domain-row.off .domain-name { text-decoration: line-through; color: var(--muted) }

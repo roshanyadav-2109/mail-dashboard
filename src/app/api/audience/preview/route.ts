@@ -1,5 +1,6 @@
 import { resolveAudience, type Audience } from '@/lib/audience'
 import { db } from '@/lib/db'
+import { domainOf } from '@/lib/domains'
 import { apiRole } from '@/lib/guard'
 import { sentToday } from '@/lib/sender'
 import { getSettings } from '@/lib/settings'
@@ -21,6 +22,18 @@ export async function POST(req: Request) {
     emails: resolved.emails.slice(0, 2000),
     suppressed: resolved.suppressed.length,
     optedOut: resolved.optedOut.length,
+    domainExcluded: resolved.domainExcluded.length,
+    // Top domains among everyone selected (before domain exclusion), for the one-click exclude list.
+    domains: Object.entries(
+      [...resolved.emails, ...resolved.domainExcluded].reduce<Record<string, number>>((m, e) => {
+        const d = domainOf(e)
+        m[d] = (m[d] ?? 0) + 1
+        return m
+      }, {}),
+    )
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 20)
+      .map(([domain, count]) => ({ domain, count })),
     remainingToday: Math.max(0, settings.daily_limit - today),
     dailyLimit: settings.daily_limit,
     approvalNeeded: settings.approval_enabled && resolved.emails.length > settings.approval_threshold,

@@ -27,6 +27,8 @@ export type Settings = {
   alert_schedule: boolean
   /** Alert recipients; empty = every admin. */
   alert_to: string[]
+  /** Domains never emailed by any send ("yahoo.com", "*.edu"). */
+  excluded_domains: string[]
 }
 
 export const DEFAULTS: Settings = {
@@ -42,6 +44,7 @@ export const DEFAULTS: Settings = {
   alert_bounce: true,
   alert_schedule: true,
   alert_to: [],
+  excluded_domains: [],
 }
 
 /** Current settings merged over the defaults. Cached for the duration of one request. */

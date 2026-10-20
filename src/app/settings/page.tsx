@@ -1,6 +1,7 @@
 import { revalidatePath } from 'next/cache'
 
 import { db } from '@/lib/db'
+import { parsePatterns } from '@/lib/domains'
 import { parseEmails } from '@/lib/emails'
 import { requireRole } from '@/lib/guard'
 import { atLeast } from '@/lib/roles'
@@ -72,6 +73,7 @@ export default async function Settings({ searchParams }: { searchParams: Promise
               alert_bounce: form.get('alert_bounce') === 'on',
               alert_schedule: form.get('alert_schedule') === 'on',
               alert_to: parseEmails(String(form.get('alert_to') ?? '')).slice(0, 20),
+              excluded_domains: parsePatterns(String(form.get('excluded_domains') ?? '')).slice(0, 200),
             },
             actor.email,
           )
@@ -128,6 +130,10 @@ export default async function Settings({ searchParams }: { searchParams: Promise
           <label className="span-all">
             Alerts go to
             <input name="alert_to" defaultValue={s.alert_to.join(', ')} placeholder={`All admins (${recipients.join(', ')})`} />
+          </label>
+          <label className="span-all">
+            Never email these domains
+            <input name="excluded_domains" defaultValue={s.excluded_domains.join(', ')} placeholder="e.g. competitor.com, *.edu — left out of every send" />
           </label>
           <label className="span-all">
             Default test recipients
