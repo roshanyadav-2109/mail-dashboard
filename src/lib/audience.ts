@@ -12,7 +12,14 @@ export type Contact = {
   created_at: string
 }
 
-export type Audience = { groups: string[]; segments: string[]; emails: string[]; exclude?: string[]; excludeDomains?: string[] }
+// allContacts / prefixes pick people straight from Contacts: everyone, or addresses starting with e.g. "25f1".
+export type Audience = { groups: string[]; segments: string[]; emails: string[]; exclude?: string[]; excludeDomains?: string[]; allContacts?: boolean; prefixes?: string[] }
+
+/** A "starts with" prefix for picking contacts: lower-case letters, digits and . _ + - @ only. */
+export const cleanPrefix = (p: string): string | null => {
+  const v = p.trim().toLowerCase()
+  return /^[a-z0-9._+@-]{1,40}$/.test(v) ? v : null
+}
 export const EMPTY_AUDIENCE: Audience = { groups: [], segments: [], emails: [], exclude: [], excludeDomains: [] }
 
 export type Condition =
@@ -208,6 +215,12 @@ export async function resolveAudience(audience: Audience): Promise<Resolved> {
   for (const segmentId of audience.segments ?? []) {
     const { data: seg } = await sb.from('segments').select('rules').eq('id', segmentId).maybeSingle()
     if (seg) (await segmentContacts(seg.rules as Rules)).forEach((c) => set.add(c.email))
+  }
+  if (audience.allContacts) {
+    ;(await fetchAll<{ email: string }>((from, to) => sb.from('contacts').select('email').order('email').range(from, to))).forEach((c) => set.add(c.email))
+  } else if (audience.prefixes?.length) {
+    const prefixes = audience.prefixes.map(cleanPrefix).filter((p): p is string => !!p)
+    if (prefixes.length) (await fetchAll<{ email: string }>((from, to) => sb.rpc('contacts_with_prefixes', { prefixes }).range(from, to))).forEach((c) => set.add(c.email))
   }
   for (const e of audience.emails ?? []) set.add(e.trim().toLowerCase())
   for (const e of audience.exclude ?? []) set.delete(e.trim().toLowerCase())

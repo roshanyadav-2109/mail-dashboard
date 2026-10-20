@@ -64,6 +64,8 @@ export default function Composer(props: {
   const [dialog, setDialog] = useState(false)
   const [domainInput, setDomainInput] = useState('')
   const [containsInput, setContainsInput] = useState('')
+  const [prefixInput, setPrefixInput] = useState('')
+  const [prefixOpts, setPrefixOpts] = useState<{ total: number; exact: number; options: { prefix: string; n: number }[] } | null>(null)
   type RiskData = { total: number; quality: { email: string; reason: string; suggestion?: string }[]; softBounced: string[]; inactive: string[]; fresh: string[] }
   const [risk, setRisk] = useState<RiskData | null>(null)
   const [skip, setSkip] = useState({ quality: true, soft: true, inactive: false, fresh: false })
@@ -94,6 +96,21 @@ export default function Composer(props: {
   const [bestInfo, setBestInfo] = useState<{ total: number; known: number; top: { label: string; people: number }[]; rule: { minSamples: number; minDays: number } } | null>(null)
   const [at, setAt] = useState(localInput(new Date(Date.now() + 60 * 60_000)))
   const [pendingAdd, setPendingAdd] = useState<{ list: string[]; flags: Flag[] } | null>(null)
+
+  // ── From contacts: "starts with" suggestions as you type ("25" → 25f1, 25f2, 25ds …) ──
+  useEffect(() => {
+    if (drawer !== 'recipients') return
+    const t = setTimeout(async () => {
+      const res = await fetch(`/api/contacts/prefixes?q=${encodeURIComponent(prefixInput.trim().toLowerCase())}`)
+      if (res.ok) setPrefixOpts(await res.json())
+    }, 250)
+    return () => clearTimeout(t)
+  }, [prefixInput, drawer])
+  const togglePrefix = (p: string) =>
+    setAudience((a) => {
+      const list = a.prefixes ?? []
+      return { ...a, allContacts: false, prefixes: list.includes(p) ? list.filter((x) => x !== p) : [...list, p] }
+    })
 
   // ── Live recipient preview ────────────────────────────────────────────────
   const audienceKey = JSON.stringify(audience)
@@ -346,6 +363,17 @@ export default function Composer(props: {
               ◇ {segName(id)} <a onClick={() => toggle('segments', id)}>×</a>
             </span>
           ))}
+          {audience.allContacts && (
+            <span className="chip">
+              All contacts <a onClick={() => setAudience((a) => ({ ...a, allContacts: false }))}>×</a>
+            </span>
+          )}
+          {!audience.allContacts &&
+            (audience.prefixes ?? []).map((p) => (
+              <span className="chip" key={p}>
+                {p}… <a onClick={() => togglePrefix(p)}>×</a>
+              </span>
+            ))}
           {audience.emails.length > 0 && <span className="chip">{audience.emails.length} addresses</span>}
           {(audience.excludeDomains ?? []).length > 0 && <span className="chip">excluding {(audience.excludeDomains ?? []).map(showPattern).join(', ')}</span>}
           {preview && (
@@ -409,6 +437,44 @@ export default function Composer(props: {
                 </div>
               </div>
             )}
+            <div className="panel-sec">
+              <div className="panel-label">From contacts</div>
+              <label className="check-row" style={{ marginTop: 0 }}>
+                <input type="checkbox" checked={!!audience.allContacts} onChange={(e) => setAudience((a) => ({ ...a, allContacts: e.target.checked }))} />
+                All contacts{prefixOpts ? ` · ${prefixOpts.total.toLocaleString('en-IN')}` : ''}
+              </label>
+              {!audience.allContacts && (
+                <>
+                  <input value={prefixInput} onChange={(e) => setPrefixInput(e.target.value)} placeholder="Address starts with… e.g. 25 or 25f1" aria-label="Address starts with" style={{ width: '100%', marginTop: 8 }} />
+                  {(audience.prefixes ?? []).length > 0 && (
+                    <div className="pills" style={{ marginTop: 8 }}>
+                      {(audience.prefixes ?? []).map((p) => (
+                        <button key={p} type="button" className="pill on" onClick={() => togglePrefix(p)} aria-pressed title="Click to remove">
+                          {p}… ×
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {prefixOpts && (
+                    <div className="pills" style={{ marginTop: 8 }}>
+                      {prefixInput.trim() && prefixOpts.exact > 0 && !(audience.prefixes ?? []).includes(prefixInput.trim().toLowerCase()) && (
+                        <button type="button" className="pill" onClick={() => togglePrefix(prefixInput.trim().toLowerCase())}>
+                          all “{prefixInput.trim().toLowerCase()}…” · {prefixOpts.exact.toLocaleString('en-IN')}
+                        </button>
+                      )}
+                      {prefixOpts.options
+                        .filter((o) => !(audience.prefixes ?? []).includes(o.prefix))
+                        .map((o) => (
+                          <button key={o.prefix} type="button" className="pill" onClick={() => togglePrefix(o.prefix)}>
+                            {o.prefix}… · {o.n.toLocaleString('en-IN')}
+                          </button>
+                        ))}
+                      {prefixInput.trim() && prefixOpts.exact === 0 && <span className="muted">No contacts start with “{prefixInput.trim()}”.</span>}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
             <div className="panel-sec">
               <div className="panel-label">Add addresses</div>
               <textarea rows={3} value={manual} onChange={(e) => setManual(e.target.value)} placeholder="name@example.com, other@example.com" />

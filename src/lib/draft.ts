@@ -1,4 +1,4 @@
-import type { Audience } from '@/lib/audience'
+import { cleanPrefix, type Audience } from '@/lib/audience'
 import type { Doc } from '@/lib/blocks'
 import { cleanEvent, type CalendarEvent } from '@/lib/calendar'
 import { cleanRule } from '@/lib/domains'
@@ -47,6 +47,8 @@ export function cleanDraft(d: DraftInput): { value: Record<string, unknown>; err
       emails: list(a.emails).map((e) => e.trim().toLowerCase()).filter((e) => EMAIL.test(e)),
       exclude: list(a.exclude).map((e) => e.trim().toLowerCase()),
       excludeDomains: [...new Set(list(a.excludeDomains).map(cleanRule).filter((r): r is string => !!r))].slice(0, 100),
+      allContacts: a.allContacts === true,
+      prefixes: [...new Set(list(a.prefixes).map(cleanPrefix).filter((p): p is string => !!p))].slice(0, 100),
     }
   }
   if (d.attachments !== undefined) {
