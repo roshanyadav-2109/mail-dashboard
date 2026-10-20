@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 
 import type { Audience } from '@/lib/audience'
 import type { CalendarEvent } from '@/lib/calendar'
-import { parsePatterns } from '@/lib/domains'
+import { parsePatterns, parseTextRules, showPattern } from '@/lib/domains'
 import type { Content } from '@/lib/content'
 import { lint } from '@/lib/lint'
 import { SAMPLE, type MergeData } from '@/lib/render'
@@ -63,6 +63,7 @@ export default function Composer(props: {
   const [drawer, setDrawer] = useState<'recipients' | 'options' | null>(null)
   const [dialog, setDialog] = useState(false)
   const [domainInput, setDomainInput] = useState('')
+  const [containsInput, setContainsInput] = useState('')
   type RiskData = { total: number; quality: { email: string; reason: string; suggestion?: string }[]; softBounced: string[]; inactive: string[]; fresh: string[] }
   const [risk, setRisk] = useState<RiskData | null>(null)
   const [skip, setSkip] = useState({ quality: true, soft: true, inactive: false, fresh: false })
@@ -346,7 +347,7 @@ export default function Composer(props: {
             </span>
           ))}
           {audience.emails.length > 0 && <span className="chip">{audience.emails.length} addresses</span>}
-          {(audience.excludeDomains ?? []).length > 0 && <span className="chip">excluding {(audience.excludeDomains ?? []).join(', ')}</span>}
+          {(audience.excludeDomains ?? []).length > 0 && <span className="chip">excluding {(audience.excludeDomains ?? []).map(showPattern).join(', ')}</span>}
           {preview && (
             <span className="muted">
               {count} recipient{count === 1 ? '' : 's'}
@@ -436,7 +437,7 @@ export default function Composer(props: {
               </div>
             </div>
             <div className="panel-sec">
-              <div className="panel-label">Exclude domains</div>
+              <div className="panel-label">Exclude domains or addresses</div>
               {(preview?.domains ?? []).length > 0 && (
                 <div className="domain-list">
                   {(preview?.domains ?? []).map((d) => {
@@ -479,14 +480,27 @@ export default function Composer(props: {
                     .filter((p) => !(preview?.domains ?? []).some((d) => d.domain === p))
                     .map((p) => (
                       <span className="chip" key={p}>
-                        {p.startsWith('.') ? `*${p}` : p} <a onClick={() => setAudience((a) => ({ ...a, excludeDomains: (a.excludeDomains ?? []).filter((x) => x !== p) }))}>×</a>
+                        {showPattern(p)} <a onClick={() => setAudience((a) => ({ ...a, excludeDomains: (a.excludeDomains ?? []).filter((x) => x !== p) }))}>×</a>
                       </span>
                     ))}
                 </div>
               )}
+              <div className="row" style={{ marginTop: 8 }}>
+                <input value={containsInput} onChange={(e) => setContainsInput(e.target.value)} placeholder="Address contains, e.g. 21f1" style={{ flex: 1 }} />
+                <button
+                  className="ghost"
+                  onClick={() => {
+                    const add = parseTextRules('contains', containsInput)
+                    if (add.length) setAudience((a) => ({ ...a, excludeDomains: [...new Set([...(a.excludeDomains ?? []), ...add])] }))
+                    setContainsInput('')
+                  }}
+                >
+                  Exclude
+                </button>
+              </div>
               {(preview?.domainExcluded ?? 0) > 0 && (
                 <p className="muted" style={{ margin: '8px 0 0' }}>
-                  {preview?.domainExcluded} left out by domain (this send, plus the Excluded domains list).
+                  {preview?.domainExcluded} left out by these rules (this send, plus the Exclusions list).
                 </p>
               )}
             </div>

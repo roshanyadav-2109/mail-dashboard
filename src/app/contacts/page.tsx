@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { audit } from '@/lib/audit'
 import { fetchAll, upsertContacts } from '@/lib/audience'
 import { db } from '@/lib/db'
+import { cleanTextRule, showPattern } from '@/lib/domains'
 import { applyFlagChoice } from '@/lib/flags'
 import { requireRole } from '@/lib/guard'
 import { atLeast } from '@/lib/roles'
@@ -49,6 +50,12 @@ export default async function Contacts({ searchParams }: { searchParams: Promise
     return s ? `?${s}` : '/contacts'
   }
 
+  // Bulk actions work on email addresses containing the search text (names are ignored, to be precise).
+  const bulkTerm = needle && needle.length >= 2 ? needle.toLowerCase() : null
+  const bulkCount = bulkTerm && canEdit ? ((await sb.from('contacts').select('id', { count: 'exact', head: true }).ilike('email', `%${bulkTerm}%`)).count ?? 0) : 0
+  const bulkRule = bulkTerm ? cleanTextRule('contains', bulkTerm) : null
+  const { data: ruleRow } = bulkRule ? await sb.from('excluded_domains').select('pattern').eq('pattern', bulkRule).maybeSingle() : { data: null }
+
   const table = (
     <div className="card">
       <div className="card-head">
@@ -61,6 +68,90 @@ export default async function Contacts({ searchParams }: { searchParams: Promise
         </form>
         <span className="muted">{total} contacts</span>
       </div>
+      {bulkTerm && bulkCount > 0 && (
+        <div className="bulk-bar">
+          <span>
+            <b>{bulkCount}</b> address{bulkCount === 1 ? '' : 'es'} contain “{bulkTerm}”
+          </span>
+          {bulkRule &&
+            (ruleRow ? (
+              <span className="muted">Already excluded from every send ({showPattern(bulkRule)})</span>
+            ) : (
+              <form
+                action={async () => {
+                  'use server'
+                  const actor = await requireRole('sender')
+                  await db().from('excluded_domains').upsert({ pattern: bulkRule, note: 'added from Contacts search', added_by: actor.email }, { onConflict: 'pattern', ignoreDuplicates: true })
+                  await audit(actor.email, 'domain.excluded', { type: 'domain' }, { patterns: [bulkRule], via: 'contacts search' })
+                  revalidatePath('/contacts')
+                }}
+              >
+                <button className="ghost" type="submit" title="Adds a rule on the Exclusions page; contacts stay where they are">
+                  Exclude from every send
+                </button>
+              </form>
+            ))}
+          {(groups ?? []).length > 0 && (
+            <form
+              className="row"
+              action={async (fd) => {
+                'use server'
+                const actor = await requireRole('sender')
+                const groupId = String(fd.get('group') ?? '')
+                if (!groupId) return
+                const ids = await fetchAll<{ id: string }>((from, to) => db().from('contacts').select('id').ilike('email', `%${bulkTerm}%`).range(from, to))
+                for (let i = 0; i < ids.length; i += 200)
+                  await db()
+                    .from('group_members')
+                    .delete()
+                    .eq('group_id', groupId)
+                    .in(
+                      'contact_id',
+                      ids.slice(i, i + 200).map((x) => x.id),
+                    )
+                await audit(actor.email, 'group.members_removed', { type: 'group', id: groupId }, { matching: bulkTerm, count: ids.length })
+                revalidatePath('/contacts')
+              }}
+            >
+              <select name="group" defaultValue="" aria-label="Group">
+                <option value="">Remove from group…</option>
+                {(groups ?? []).map((g: { id: string; name: string }) => (
+                  <option key={g.id} value={g.id}>
+                    {g.name}
+                  </option>
+                ))}
+              </select>
+              <button className="ghost" type="submit">
+                Remove
+              </button>
+            </form>
+          )}
+          <details className="danger-zone">
+            <summary className="btn danger">Delete these {bulkCount}…</summary>
+            <form
+              className="row"
+              action={async (fd) => {
+                'use server'
+                const actor = await requireRole('sender')
+                if (fd.get('confirm') !== 'on') return
+                const victims = await fetchAll<{ email: string }>((from, to) => db().from('contacts').select('email').ilike('email', `%${bulkTerm}%`).range(from, to))
+                await db().from('contacts').delete().ilike('email', `%${bulkTerm}%`)
+                await audit(actor.email, 'contacts.bulk_deleted', { type: 'contacts' }, { matching: bulkTerm, count: victims.length, sample: victims.slice(0, 20).map((v) => v.email) })
+                revalidatePath('/contacts')
+                const { redirect } = await import('next/navigation')
+                redirect('/contacts')
+              }}
+            >
+              <label className="check-row" style={{ margin: 0 }}>
+                <input type="checkbox" name="confirm" required /> Permanently delete {bulkCount} contacts and their group memberships
+              </label>
+              <button className="danger" type="submit">
+                Delete
+              </button>
+            </form>
+          </details>
+        </div>
+      )}
       {tags.length > 0 && (
         <div className="card-head pills" style={{ justifyContent: 'flex-start' }}>
           <Link className={`pill${!tag ? ' on' : ''}`} href={qs({ tag: undefined })}>

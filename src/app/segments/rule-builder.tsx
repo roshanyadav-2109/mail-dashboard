@@ -12,6 +12,7 @@ const DEFAULTS: Record<Condition['type'], Condition> = {
   field: { type: 'field', key: '', op: 'equals', value: '' },
   engagement: { type: 'engagement', op: 'opened', value: 'last' },
   created: { type: 'created', op: 'within_days', value: 30 },
+  email: { type: 'email', op: 'contains', value: '' },
 }
 
 /** Point-and-click editor for segment rules. Writes the JSON into a hidden "rules" input for the form. */
@@ -63,6 +64,7 @@ export default function RuleBuilder({
             <option value="field">Custom field</option>
             <option value="engagement">Engagement</option>
             <option value="created">Added</option>
+            <option value="email">Email address</option>
           </select>
 
           {c.type === 'tag' && (
@@ -133,6 +135,18 @@ export default function RuleBuilder({
               </select>
               <input type="number" min={1} value={c.value} onChange={(e) => set(i, { ...c, value: Math.max(1, Number(e.target.value) || 1) })} style={{ width: 90 }} />
               <span className="muted">days {c.op === 'older_than_days' ? 'ago' : ''}</span>
+            </>
+          )}
+
+          {c.type === 'email' && (
+            <>
+              <select value={c.op} onChange={(e) => set(i, { ...c, op: e.target.value as 'contains' | 'starts_with' | 'ends_with' | 'not_contains' })}>
+                <option value="contains">contains</option>
+                <option value="not_contains">does not contain</option>
+                <option value="starts_with">starts with</option>
+                <option value="ends_with">ends with</option>
+              </select>
+              <input value={c.value} onChange={(e) => set(i, { ...c, value: e.target.value })} placeholder="e.g. 21f1 or @ds.study.iitm.ac.in" />
             </>
           )}
 

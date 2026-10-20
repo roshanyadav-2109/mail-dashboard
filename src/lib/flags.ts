@@ -15,7 +15,7 @@ export const FLAG_LABEL: Record<FlagReason, string> = {
   typo: 'Looks like a typo',
   disposable: 'Throwaway inbox',
   no_mail: 'This domain can’t receive email',
-  excluded_domain: 'Domain is on the Excluded domains list',
+  excluded_domain: 'Matches an Exclusions rule',
 }
 
 /**

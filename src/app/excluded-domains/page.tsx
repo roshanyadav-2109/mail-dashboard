@@ -3,7 +3,7 @@ import { revalidatePath } from 'next/cache'
 import { audit } from '@/lib/audit'
 import { fetchAll } from '@/lib/audience'
 import { db } from '@/lib/db'
-import { domainOf, matchesDomain, parsePatterns, showPattern } from '@/lib/domains'
+import { domainOf, isTextRule, matchesDomain, parsePatterns, parseTextRules, showPattern } from '@/lib/domains'
 import { requireRole } from '@/lib/guard'
 import { atLeast } from '@/lib/roles'
 
@@ -30,7 +30,7 @@ export default async function ExcludedDomains({ searchParams }: { searchParams: 
     <div className="card">
       <div className="card-head">
         <h2>
-          {rows.length} excluded domain{rows.length === 1 ? '' : 's'}
+          {rows.length} exclusion rule{rows.length === 1 ? '' : 's'}
           {rows.length > 0 && <span className="muted"> · {total} contact{total === 1 ? '' : 's'} left out of every send</span>}
         </h2>
       </div>
@@ -41,13 +41,13 @@ export default async function ExcludedDomains({ searchParams }: { searchParams: 
         </div>
       )}
       {rows.length === 0 ? (
-        <div className="empty">No domains excluded. Every domain can be emailed.</div>
+        <div className="empty">No exclusions. Every address can be emailed.</div>
       ) : (
         <div className="scroll">
           <table>
             <thead>
               <tr>
-                <th>Domain</th>
+                <th>Rule</th>
                 <th className="num">Contacts left out</th>
                 <th className="hide-sm">Note</th>
                 <th className="hide-sm">Added</th>
@@ -61,7 +61,7 @@ export default async function ExcludedDomains({ searchParams }: { searchParams: 
                   <tr key={r.pattern}>
                     <td>
                       <strong>{showPattern(r.pattern)}</strong>
-                      <div className="muted">{r.pattern.startsWith('.') ? `subdomains of ${r.pattern.slice(1)} only` : 'this exact domain only'}</div>
+                      <div className="muted">{isTextRule(r.pattern) ? 'anywhere in the email address' : r.pattern.startsWith('.') ? `subdomains of ${r.pattern.slice(1)} only` : 'this exact domain only'}</div>
                     </td>
                     <td className="num">
                       {hits.length > 0 ? (
@@ -120,7 +120,9 @@ export default async function ExcludedDomains({ searchParams }: { searchParams: 
         action={async (fd) => {
           'use server'
           const actor = await requireRole('sender')
-          const patterns = parsePatterns(String(fd.get('domains') ?? '')).slice(0, 200)
+          const kind = String(fd.get('kind') ?? 'domain')
+          const raw = String(fd.get('domains') ?? '')
+          const patterns = (kind === 'contains' || kind === 'starts' ? parseTextRules(kind, raw) : parsePatterns(raw)).slice(0, 200)
           if (!patterns.length) return
           const note = String(fd.get('note') ?? '').trim().slice(0, 200)
           const sb2 = db()
@@ -136,8 +138,14 @@ export default async function ExcludedDomains({ searchParams }: { searchParams: 
           redirect(`/excluded-domains?${q}`)
         }}
       >
-        <label style={{ marginTop: 0 }}>Domains to exclude</label>
-        <textarea name="domains" rows={4} placeholder={'competitor.com\nyahoo.co.in\n*.edu'} required />
+        <label style={{ marginTop: 0 }}>Rule type</label>
+        <select name="kind" defaultValue="domain" style={{ width: '100%' }}>
+          <option value="domain">Domain (exact)</option>
+          <option value="contains">Address contains…</option>
+          <option value="starts">Address starts with…</option>
+        </select>
+        <label>Values (one per line)</label>
+        <textarea name="domains" rows={4} placeholder={'competitor.com   — for Domain\n21f1                — for “contains”'} required />
         <label>Note (optional)</label>
         <input name="note" placeholder="Why these are excluded" />
         <div style={{ marginTop: 12 }}>
@@ -155,6 +163,9 @@ export default async function ExcludedDomains({ searchParams }: { searchParams: 
         <p className="muted" style={{ margin: 0 }}>
           <b>*.yahoo.com</b> — every subdomain of yahoo.com, but not yahoo.com itself. <b>*.edu</b> — every domain ending in .edu.
         </p>
+        <p className="muted" style={{ margin: '6px 0 0' }}>
+          <b>Address contains 21f1</b> — any address with “21f1” anywhere, e.g. 21f1000123@ds.study.iitm.ac.in. <b>Starts with</b> — only at the beginning.
+        </p>
         <p className="muted" style={{ margin: '10px 0 0' }}>
           Excluded people stay in your contacts and groups; they are just left out of every send. To leave a domain out of a single send instead, use Compose → Recipients → Exclude domains.
         </p>
@@ -162,5 +173,5 @@ export default async function ExcludedDomains({ searchParams }: { searchParams: 
     </>
   )
 
-  return <PanelLayout title="Excluded domains" main={table} panel={form} panelLabel="Add domains" panelTitle="Exclude domains" defaultOpen={canEdit && rows.length === 0} hidePanel={!canEdit} />
+  return <PanelLayout title="Exclusions" main={table} panel={form} panelLabel="Add rule" panelTitle="New exclusion rule" defaultOpen={canEdit && rows.length === 0} hidePanel={!canEdit} />
 }

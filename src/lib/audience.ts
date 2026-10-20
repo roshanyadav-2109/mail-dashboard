@@ -21,6 +21,7 @@ export type Condition =
   | { type: 'field'; key: string; op: 'equals' | 'contains' | 'empty' | 'not_empty'; value?: string }
   | { type: 'engagement'; op: 'opened' | 'not_opened' | 'clicked' | 'not_clicked'; value: 'last' | 'any30' | string }
   | { type: 'created'; op: 'within_days' | 'older_than_days'; value: number }
+  | { type: 'email'; op: 'contains' | 'starts_with' | 'ends_with' | 'not_contains'; value: string }
 export type Rules = { match: 'all' | 'any'; conditions: Condition[] }
 
 const CHUNK = 200
@@ -162,6 +163,14 @@ export async function segmentContacts(rules: Rules, pool?: Contact[]): Promise<C
         const kind = c.op.includes('opened') ? 'opened' : 'clicked'
         const hit = engagement.get(`${kind}:${c.value}`)?.has(k.email) ?? false
         return c.op.startsWith('not_') ? !hit : hit
+      }
+      case 'email': {
+        const v = c.value.toLowerCase()
+        if (!v) return false
+        if (c.op === 'starts_with') return k.email.startsWith(v)
+        if (c.op === 'ends_with') return k.email.endsWith(v)
+        if (c.op === 'not_contains') return !k.email.includes(v)
+        return k.email.includes(v)
       }
       case 'created': {
         const days = (Date.now() - new Date(k.created_at).getTime()) / 86_400_000

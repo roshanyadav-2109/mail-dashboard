@@ -1,7 +1,7 @@
 import type { Audience } from '@/lib/audience'
 import type { Doc } from '@/lib/blocks'
 import { cleanEvent, type CalendarEvent } from '@/lib/calendar'
-import { parsePatterns } from '@/lib/domains'
+import { cleanRule } from '@/lib/domains'
 import type { StoredAttachment } from '@/lib/sender'
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -46,7 +46,7 @@ export function cleanDraft(d: DraftInput): { value: Record<string, unknown>; err
       segments: list(a.segments).slice(0, 100),
       emails: list(a.emails).map((e) => e.trim().toLowerCase()).filter((e) => EMAIL.test(e)),
       exclude: list(a.exclude).map((e) => e.trim().toLowerCase()),
-      excludeDomains: parsePatterns(list(a.excludeDomains).join(' ')).slice(0, 100),
+      excludeDomains: [...new Set(list(a.excludeDomains).map(cleanRule).filter((r): r is string => !!r))].slice(0, 100),
     }
   }
   if (d.attachments !== undefined) {
