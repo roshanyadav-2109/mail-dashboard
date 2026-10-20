@@ -53,18 +53,6 @@ export async function domainHealth(): Promise<{ domain: string; region: string; 
     })
   }
 
-  // SPF on the root domain.
-  const rootTxt = await txt(domain)
-  const spf = rootTxt.find((r) => r.toLowerCase().startsWith('v=spf1'))
-  checks.push({
-    name: 'SPF on the domain',
-    status: spf ? 'ok' : 'info',
-    detail: spf
-      ? `Found: ${spf}`
-      : 'No SPF record. Not required while SES uses its own bounce domain, but recommended alongside a custom MAIL FROM (below).',
-    fix: spf ? undefined : [{ type: 'TXT', host: domain, value: 'v=spf1 include:amazonses.com ~all' }],
-  })
-
   // DMARC policy.
   const dmarc = (await txt(`_dmarc.${domain}`)).find((r) => r.toUpperCase().startsWith('V=DMARC1'))
   const reportTo = settings.reply_to || 'desk@unknowniitians.com'
@@ -98,6 +86,19 @@ export async function domainHealth(): Promise<{ domain: string; region: string; 
           { type: 'MX', host: suggested, value: `10 feedback-smtp.${region}.amazonses.com` },
           { type: 'TXT', host: suggested, value: 'v=spf1 include:amazonses.com ~all' },
         ],
+  })
+
+  // SPF on the root domain: only needed if mail is sent with the root domain as the bounce address.
+  const rootTxt = await txt(domain)
+  const spf = rootTxt.find((r) => r.toLowerCase().startsWith('v=spf1'))
+  checks.push({
+    name: 'SPF on the domain',
+    status: spf || mfOk ? 'ok' : 'info',
+    detail: spf
+      ? `Found: ${spf}`
+      : mfOk
+        ? `Not needed — inboxes check SPF on ${suggested}, which is set up.`
+        : 'No SPF record. Not required while SES uses its own bounce domain; set up the custom MAIL FROM below instead.',
   })
 
   // Replies: the reply-to mailbox must accept mail.
