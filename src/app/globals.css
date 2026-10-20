@@ -579,3 +579,10 @@ fieldset:disabled input, fieldset:disabled select { background: var(--hover); co
 .danger-zone summary::-webkit-details-marker { display: none }
 .danger-zone[open] { flex-basis: 100% }
 .danger-zone form { margin-top: 8px }
+
+/* Home → AWS account */
+.warn { color: var(--warn) }
+.meter { height: 6px; border-radius: 999px; background: var(--hover); overflow: hidden; margin: 8px 0 6px }
+.meter span { display: block; height: 100%; background: var(--good); border-radius: inherit }
+.meter span.warn { background: var(--warn) }
+.meter span.bad { background: var(--bad) }

@@ -1,8 +1,12 @@
 import Link from 'next/link'
+import { Suspense } from 'react'
 
 import { db } from '@/lib/db'
-import { requireUser } from '@/lib/guard'
+import { requireRole } from '@/lib/guard'
 import { LEVEL_LABEL, senderHealth } from '@/lib/health'
+import { atLeast } from '@/lib/roles'
+
+import AwsCard from './aws-card'
 
 import Icon from './icons'
 import SearchTrigger from './search-trigger'
@@ -61,7 +65,7 @@ function Row({ href, icon, children }: { href: string; icon: 'campaigns' | 'user
 }
 
 export default async function Home({ searchParams }: { searchParams: Promise<{ denied?: string }> }) {
-  await requireUser()
+  const me = await requireRole('viewer')
   const { denied } = await searchParams
   const sb = db()
   const [{ data: c }, { data: l }, { data: e }, { count: blockedCount }, health, { data: waiting }, { count: toReview }] = await Promise.all([
@@ -163,6 +167,13 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ d
           <div className="sub">{sum('complained')} complaints</div>
         </div>
       </div>
+
+      {/* Billing is for admins; streamed in so the AWS calls never slow down the rest of the page. */}
+      {atLeast(me.role, 'admin') && (
+        <Suspense fallback={null}>
+          <AwsCard />
+        </Suspense>
+      )}
 
       <div className="banner">
         <div className="banner-art" />
