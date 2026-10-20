@@ -23,6 +23,7 @@ export const NAV: NavGroup[] = [
       { href: '/segments', name: 'Segments', icon: 'list', min: 'viewer' },
       { href: '/unsubscribed', name: 'Unsubscribed', icon: 'ban', min: 'viewer' },
       { href: '/suppressions', name: 'Suppressions', icon: 'shield', min: 'viewer' },
+      { href: '/excluded-domains', name: 'Excluded domains', icon: 'globe', min: 'viewer' },
       { href: '/forms', name: 'Signup forms', icon: 'send', min: 'sender' },
     ],
   },

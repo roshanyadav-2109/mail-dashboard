@@ -461,7 +461,7 @@ export default function Composer(props: {
                 </div>
               )}
               <div className="row" style={{ marginTop: 8 }}>
-                <input value={domainInput} onChange={(e) => setDomainInput(e.target.value)} placeholder="Exclude e.g. yahoo.com, *.edu" style={{ flex: 1 }} />
+                <input value={domainInput} onChange={(e) => setDomainInput(e.target.value)} placeholder="Exact domain, e.g. yahoo.com (or *.edu)" style={{ flex: 1 }} />
                 <button
                   className="ghost"
                   onClick={() => {
@@ -486,7 +486,7 @@ export default function Composer(props: {
               )}
               {(preview?.domainExcluded ?? 0) > 0 && (
                 <p className="muted" style={{ margin: '8px 0 0' }}>
-                  {preview?.domainExcluded} left out by domain (including any set in Settings).
+                  {preview?.domainExcluded} left out by domain (this send, plus the Excluded domains list).
                 </p>
               )}
             </div>

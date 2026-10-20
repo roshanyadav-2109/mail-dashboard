@@ -1,7 +1,7 @@
 import { db } from '@/lib/db'
 import { matchesDomain } from '@/lib/domains'
 import { checkQuality } from '@/lib/quality'
-import { getSettings } from '@/lib/settings'
+import { getExcludedDomains } from '@/lib/excluded'
 
 export type FlagReason = 'bounce' | 'complaint' | 'unsubscribe' | 'manual' | 'left_group' | 'typo' | 'disposable' | 'no_mail' | 'excluded_domain'
 export type Flag = { email: string; reason: FlagReason; label: string; since?: string; suggestion?: string }
@@ -15,7 +15,7 @@ export const FLAG_LABEL: Record<FlagReason, string> = {
   typo: 'Looks like a typo',
   disposable: 'Throwaway inbox',
   no_mail: 'This domain can’t receive email',
-  excluded_domain: 'Domain is excluded in Settings',
+  excluded_domain: 'Domain is on the Excluded domains list',
 }
 
 /**
@@ -37,7 +37,7 @@ export async function flagged(emails: string[], groupId?: string | null): Promis
         if (!out.has(r.email)) out.set(r.email, { email: r.email, reason: 'left_group', label: FLAG_LABEL.left_group, since: r.created_at })
     }
   }
-  const excluded = (await getSettings()).excluded_domains
+  const excluded = await getExcludedDomains()
   if (excluded.length)
     for (const e of list) if (!out.has(e) && matchesDomain(e, excluded)) out.set(e, { email: e, reason: 'excluded_domain', label: FLAG_LABEL.excluded_domain })
   for (const q of await checkQuality(list.filter((e) => !out.has(e))))

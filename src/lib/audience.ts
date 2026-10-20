@@ -1,6 +1,6 @@
 import { db } from '@/lib/db'
 import { matchesDomain } from '@/lib/domains'
-import { getSettings } from '@/lib/settings'
+import { getExcludedDomains } from '@/lib/excluded'
 
 export type Contact = {
   id: string
@@ -211,7 +211,7 @@ export async function resolveAudience(audience: Audience): Promise<Resolved> {
     const { data } = await sb.from('suppressions').select('email').in('email', part)
     data?.forEach((r: { email: string }) => blocked.add(r.email))
   }
-  const patterns = [...(audience.excludeDomains ?? []), ...(await getSettings()).excluded_domains]
+  const patterns = [...(audience.excludeDomains ?? []), ...(await getExcludedDomains())]
   const domainExcluded = patterns.length ? all.filter((e) => !blocked.has(e) && matchesDomain(e, patterns)) : []
   const dropped = new Set(domainExcluded)
   return { emails: all.filter((e) => !blocked.has(e) && !dropped.has(e)), suppressed: [...blocked], optedOut: [...optedOut], domainExcluded }
