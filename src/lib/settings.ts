@@ -21,6 +21,12 @@ export type Settings = {
   weekly_report_to: string[]
   /** SES DKIM tokens, used by Domain health when the sending key can’t read SES. */
   dkim_tokens: string[]
+  /** Email the team when a campaign’s bounce rate passes 5%. */
+  alert_bounce: boolean
+  /** Email the team when scheduled campaigns start, finish or pause at the daily limit. */
+  alert_schedule: boolean
+  /** Alert recipients; empty = every admin. */
+  alert_to: string[]
 }
 
 export const DEFAULTS: Settings = {
@@ -33,6 +39,9 @@ export const DEFAULTS: Settings = {
   weekly_report: true,
   weekly_report_to: [],
   dkim_tokens: [],
+  alert_bounce: true,
+  alert_schedule: true,
+  alert_to: [],
 }
 
 /** Current settings merged over the defaults. Cached for the duration of one request. */

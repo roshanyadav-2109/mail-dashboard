@@ -69,6 +69,9 @@ export default async function Settings({ searchParams }: { searchParams: Promise
               test_recipients: parseEmails(String(form.get('test_recipients') ?? '')).slice(0, 10),
               weekly_report: form.get('weekly_report') === 'on',
               weekly_report_to: parseEmails(String(form.get('weekly_report_to') ?? '')).slice(0, 20),
+              alert_bounce: form.get('alert_bounce') === 'on',
+              alert_schedule: form.get('alert_schedule') === 'on',
+              alert_to: parseEmails(String(form.get('alert_to') ?? '')).slice(0, 20),
             },
             actor.email,
           )
@@ -113,6 +116,18 @@ export default async function Settings({ searchParams }: { searchParams: Promise
           <label>
             Weekly report goes to
             <input name="weekly_report_to" defaultValue={s.weekly_report_to.join(', ')} placeholder={`All admins (${recipients.join(', ')})`} />
+          </label>
+          <label className="check">
+            <input name="alert_bounce" type="checkbox" defaultChecked={s.alert_bounce} />
+            Alert when a campaign’s bounce rate passes 5%
+          </label>
+          <label className="check">
+            <input name="alert_schedule" type="checkbox" defaultChecked={s.alert_schedule} />
+            Alert when scheduled campaigns start, finish or pause
+          </label>
+          <label className="span-all">
+            Alerts go to
+            <input name="alert_to" defaultValue={s.alert_to.join(', ')} placeholder={`All admins (${recipients.join(', ')})`} />
           </label>
           <label className="span-all">
             Default test recipients

@@ -1,5 +1,6 @@
 import { timingSafeEqual } from 'crypto'
 
+import { alertLimitPaused, alertScheduledStarted } from '@/lib/alerts'
 import { audit } from '@/lib/audit'
 import { db } from '@/lib/db'
 import { processBatch } from '@/lib/sender'
@@ -30,7 +31,10 @@ export async function POST(req: Request) {
     .eq('status', 'scheduled')
     .lte('scheduled_at', new Date().toISOString())
     .select('id')
-  for (const c of due ?? []) await audit('system', 'campaign.schedule_started', { type: 'campaign', id: c.id })
+  for (const c of due ?? []) {
+    await audit('system', 'campaign.schedule_started', { type: 'campaign', id: c.id })
+    await alertScheduledStarted(c.id).catch(() => {})
+  }
 
   const { data: active } = await sb.from('campaigns').select('id').eq('status', 'sending').order('updated_at')
   const summary: Record<string, unknown> = {}
@@ -40,6 +44,7 @@ export async function POST(req: Request) {
     for (;;) {
       const r = await processBatch(c.id, { size: 25, deadline })
       total += r.processed
+      if (r.paused === 'limit') await alertLimitPaused(c.id).catch(() => {})
       if (r.paused || r.processed === 0 || r.remaining === 0 || Date.now() > deadline) {
         summary[c.id] = { sent: total, remaining: r.remaining, paused: r.paused ?? null }
         break

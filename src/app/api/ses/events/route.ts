@@ -1,3 +1,4 @@
+import { checkBounceSpike } from '@/lib/alerts'
 import { automatedReason } from '@/lib/bots'
 import { db } from '@/lib/db'
 import { isSnsUrl, verifySns, type SnsMessage } from '@/lib/sns'
@@ -42,7 +43,7 @@ export async function POST(req: Request) {
   const sesId = event.mail?.messageId
   const sb = db()
 
-  const { data: message } = await sb.from('messages').select('id, email, status, opens, clicks, machine_opens, machine_clicks, sent_at').eq('ses_message_id', sesId).maybeSingle()
+  const { data: message } = await sb.from('messages').select('id, campaign_id, email, status, opens, clicks, machine_opens, machine_clicks, sent_at').eq('ses_message_id', sesId).maybeSingle()
   // The send route may not have saved the message id yet; a 500 makes SNS retry later.
   if (!message) return new Response('message not found yet', { status: 500 })
 
@@ -100,5 +101,6 @@ export async function POST(req: Request) {
   }
 
   await sb.from('messages').update(update).eq('id', message.id)
+  if (type === 'bounce' && message.campaign_id) await checkBounceSpike(message.campaign_id).catch(() => {})
   return new Response('ok')
 }

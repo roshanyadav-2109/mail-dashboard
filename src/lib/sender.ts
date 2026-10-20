@@ -1,3 +1,4 @@
+import { alertScheduledFinished } from '@/lib/alerts'
 import { buildIcs, type CalendarEvent } from '@/lib/calendar'
 import { db } from '@/lib/db'
 import { render, type MergeData } from '@/lib/render'
@@ -63,7 +64,16 @@ async function pendingCount(campaignId: string) {
 
 async function finishIfDone(campaignId: string) {
   const remaining = await pendingCount(campaignId)
-  if (remaining === 0) await db().from('campaigns').update({ status: 'sent', updated_at: new Date().toISOString() }).eq('id', campaignId).eq('status', 'sending')
+  if (remaining === 0) {
+    const { data: done } = await db()
+      .from('campaigns')
+      .update({ status: 'sent', updated_at: new Date().toISOString() })
+      .eq('id', campaignId)
+      .eq('status', 'sending')
+      .select('scheduled_at')
+    // Only the call that actually finished it sends the alert, and only for scheduled campaigns.
+    if (done?.[0]?.scheduled_at) await alertScheduledFinished(campaignId).catch(() => {})
+  }
   return remaining
 }
 
