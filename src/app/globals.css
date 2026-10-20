@@ -528,3 +528,8 @@ fieldset:disabled input, fieldset:disabled select { background: var(--hover); co
   .blk-body .row { flex-wrap: wrap }
   .theme-grid { grid-template-columns: 1fr 1fr }
 }
+.row-actions { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap }
+.kpi-link { text-decoration: none; color: inherit }
+.kpi-link:hover { border-color: var(--line-strong) }
+.kpi.attention { border-color: #f5d9a8; background: var(--warn-soft) }
+@media (max-width: 900px) { .row-actions { justify-content: flex-start } }

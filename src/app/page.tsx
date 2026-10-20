@@ -64,13 +64,14 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ d
   await requireUser()
   const { denied } = await searchParams
   const sb = db()
-  const [{ data: c }, { data: l }, { data: e }, { count: blockedCount }, health, { data: waiting }] = await Promise.all([
+  const [{ data: c }, { data: l }, { data: e }, { count: blockedCount }, health, { data: waiting }, { count: toReview }] = await Promise.all([
     sb.from('campaign_stats').select('*').order('created_at', { ascending: false }).limit(200),
     sb.from('groups').select('id, name, group_members(count)').order('created_at', { ascending: false }).limit(3),
     sb.from('ses_events').select('id, event_type, email, created_at').order('id', { ascending: false }).limit(5),
     sb.from('suppressions').select('email', { count: 'exact', head: true }),
     senderHealth(30),
     sb.from('campaigns').select('id, subject, status, scheduled_at').in('status', ['pending_approval', 'scheduled']).order('scheduled_at'),
+    sb.from('suppressions').select('email', { count: 'exact', head: true }).eq('reason', 'unsubscribe').is('reviewed_at', null),
   ])
   const campaigns = (c ?? []) as Campaign[]
   const groups = (l ?? []) as Group[]
@@ -88,6 +89,12 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ d
           <span>
             Bounces {(health.bounceRate * 100).toFixed(1)}% · complaints {(health.complaintRate * 100).toFixed(2)}% over 30 days. Clean your lists before the next send.
           </span>
+        </Link>
+      )}
+      {(toReview ?? 0) > 0 && (
+        <Link className="health-banner h-warning" href="/unsubscribed?view=review">
+          <strong>{toReview} unsubscribe{toReview === 1 ? '' : 's'} to review</strong>
+          <span>Keep them unsubscribed everywhere, or limit to leaving the group.</span>
         </Link>
       )}
       {(waiting ?? []).map((w: { id: string; subject: string; status: string; scheduled_at: string | null }) => (
