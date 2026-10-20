@@ -6,7 +6,11 @@ import { audit } from '@/lib/audit'
 import { db } from '@/lib/db'
 import { requireRole } from '@/lib/guard'
 import { atLeast } from '@/lib/roles'
+import { bestTimes, hourLabel } from '@/lib/besttime'
+import { gmailCompose } from '@/lib/gmail'
+import { getSettings } from '@/lib/settings'
 import { suppress } from '@/lib/suppress'
+import { contactTimeline } from '@/lib/timeline'
 
 import PanelLayout from '../../panel-layout'
 
@@ -47,7 +51,8 @@ export default async function ContactDetail({ params }: { params: Promise<{ id: 
   ])
   const inGroup = new Set((memberships ?? []).map((m: { group_id: string }) => m.group_id))
   const leftGroup = new Set((outs ?? []).map((o: { group_id: string }) => o.group_id))
-  const history = (msgs ?? []) as unknown as Msg[]
+  const [timeline, best, settings] = await Promise.all([contactTimeline(id, c.email), bestTimes([c.email]), getSettings()])
+  const bt = best.get(c.email)
 
   const main = (
     <div className="card">
@@ -74,48 +79,34 @@ export default async function ContactDetail({ params }: { params: Promise<{ id: 
           <div>
             {new Date(c.created_at).toLocaleString('en-IN')} · {c.source}
           </div>
+          <div className="k">Best time to email</div>
+          <div>{bt ? `Around ${hourLabel(bt.hour)} (from ${bt.samples} real opens/clicks)` : <span className="muted">Not enough history yet</span>}</div>
         </div>
       </div>
       <div className="card-head" style={{ borderTop: '1px solid var(--line)' }}>
-        <h2>Emails received ({history.length})</h2>
+        <h2>Timeline</h2>
+        <span className="muted">{timeline.length} events</span>
       </div>
-      {history.length === 0 ? (
-        <div className="empty">No emails sent to this contact yet.</div>
+      {timeline.length === 0 ? (
+        <div className="empty">Nothing yet.</div>
       ) : (
-        <div className="scroll">
-          <table>
-            <thead>
-              <tr>
-                <th>Campaign</th>
-                <th>Status</th>
-                <th className="hide-sm num">Opens</th>
-                <th className="hide-sm num">Clicks</th>
-                <th className="hide-sm">Sent</th>
-              </tr>
-            </thead>
-            <tbody>
-              {history.map((m) => (
-                <tr key={m.id}>
-                  <td>
-                    {m.campaigns ? (
-                      <Link className="link" href={`/campaigns/${m.campaigns.id}`}>
-                        {m.campaigns.subject}
-                      </Link>
-                    ) : (
-                      '—'
-                    )}
-                  </td>
-                  <td>
-                    <span className={`badge ${m.status}`}>{m.status}</span>
-                  </td>
-                  <td className="hide-sm num">{m.opens}</td>
-                  <td className="hide-sm num">{m.clicks}</td>
-                  <td className="hide-sm">{m.sent_at ? new Date(m.sent_at).toLocaleString('en-IN') : '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <ol className="timeline">
+          {timeline.map((t, i) => (
+            <li key={i} className={`tl ${t.tone ?? ''}`}>
+              <span className="tl-dot" aria-hidden />
+              <span className="tl-text">
+                {t.href ? (
+                  <Link className="link" href={t.href}>
+                    {t.text}
+                  </Link>
+                ) : (
+                  t.text
+                )}
+              </span>
+              <time className="muted">{new Date(t.at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}</time>
+            </li>
+          ))}
+        </ol>
       )}
     </div>
   )
@@ -228,6 +219,13 @@ export default async function ContactDetail({ params }: { params: Promise<{ id: 
       title={c.name || c.email}
       description={c.name ? c.email : undefined}
       back={{ href: '/contacts', name: 'Contacts' }}
+      actions={
+        <a className="btn ghost" href={gmailCompose(settings.reply_to, c.email, '', c.name ? `Hi ${c.name.split(' ')[0]},
+
+` : '')} target="_blank" rel="noreferrer" title="Opens Gmail — sent from the desk inbox, no AWS cost">
+          Write in Gmail
+        </a>
+      }
       main={main}
       panel={panel}
       panelLabel="Edit contact"

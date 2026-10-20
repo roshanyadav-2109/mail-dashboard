@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 
 import { EMPTY_AUDIENCE, type Audience } from '@/lib/audience'
 import type { Doc } from '@/lib/blocks'
+import type { CalendarEvent } from '@/lib/calendar'
 import type { CampaignRow } from '@/lib/campaigns'
 import { newContent, type Content } from '@/lib/content'
 import { db } from '@/lib/db'
@@ -27,6 +28,7 @@ export default async function Compose({
   let audience: Audience = { ...EMPTY_AUDIENCE }
   let replyTo = ''
   let attachments: CampaignRow['attachments'] = []
+  let event: CalendarEvent | null = null
 
   if (draft) {
     const { data } = await sb.from('campaigns').select('*').eq('id', draft).maybeSingle()
@@ -38,6 +40,7 @@ export default async function Compose({
     audience = { ...EMPTY_AUDIENCE, ...c.audience }
     replyTo = c.reply_to ?? ''
     attachments = c.attachments ?? []
+    event = ((c as unknown as { event: CalendarEvent | null }).event as CalendarEvent | null) ?? null
   } else if (template) {
     const { data: t } = await sb.from('templates').select('*').eq('id', template).maybeSingle()
     if (t)
@@ -66,6 +69,7 @@ export default async function Compose({
       initialAudience={audience}
       initialReplyTo={replyTo}
       initialAttachments={attachments}
+      initialEvent={event}
       templateId={template ?? null}
       groups={(groups ?? []).map((g: { id: string; name: string; group_members: { count: number }[] }) => ({ id: g.id, name: g.name, count: g.group_members?.[0]?.count ?? 0 }))}
       segments={(segments ?? []) as { id: string; name: string }[]}

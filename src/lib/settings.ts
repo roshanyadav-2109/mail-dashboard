@@ -15,6 +15,12 @@ export type Settings = {
   approval_threshold: number
   /** Pre-filled addresses for "Send test". */
   test_recipients: string[]
+  /** Monday-morning summary email. */
+  weekly_report: boolean
+  /** Report recipients; empty = every admin. */
+  weekly_report_to: string[]
+  /** SES DKIM tokens, used by Domain health when the sending key can’t read SES. */
+  dkim_tokens: string[]
 }
 
 export const DEFAULTS: Settings = {
@@ -24,6 +30,9 @@ export const DEFAULTS: Settings = {
   approval_enabled: false,
   approval_threshold: 500,
   test_recipients: [],
+  weekly_report: true,
+  weekly_report_to: [],
+  dkim_tokens: [],
 }
 
 /** Current settings merged over the defaults. Cached for the duration of one request. */

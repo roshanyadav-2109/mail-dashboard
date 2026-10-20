@@ -1,6 +1,7 @@
+import { buildIcs, type CalendarEvent } from '@/lib/calendar'
 import { db } from '@/lib/db'
 import { render, type MergeData } from '@/lib/render'
-import { isRetryable, sendEmail, type Attachment } from '@/lib/ses'
+import { isRetryable, sendEmail, senderAddress, type Attachment } from '@/lib/ses'
 import { getSettings } from '@/lib/settings'
 
 export type StoredAttachment = { path: string; name: string; type: string; size: number }
@@ -15,6 +16,7 @@ type Campaign = {
   text: string
   reply_to: string | null
   attachments: StoredAttachment[]
+  event: CalendarEvent | null
 }
 
 // Each worker stays well under the SES limit (14/s); throttled sends are re-queued, never failed.
@@ -83,7 +85,7 @@ export async function processBatch(campaignId: string, opts: { size?: number; de
     .eq('status', 'sending')
     .lt('updated_at', new Date(Date.now() - STALE_MS).toISOString())
 
-  const { data } = await sb.from('campaigns').select('id, status, subject, preheader, format, html, text, reply_to, attachments').eq('id', campaignId).maybeSingle()
+  const { data } = await sb.from('campaigns').select('id, status, subject, preheader, format, html, text, reply_to, attachments, event').eq('id', campaignId).maybeSingle()
   const campaign = data as Campaign | null
   if (!campaign) return { processed: 0, remaining: 0 }
   if (campaign.status !== 'sending') return { processed: 0, remaining: await pendingCount(campaignId), paused: 'status' }
@@ -93,8 +95,15 @@ export async function processBatch(campaignId: string, opts: { size?: number; de
   if (allowance <= 0) return { processed: 0, remaining: await pendingCount(campaignId), paused: 'limit' }
 
   const size = Math.min(opts.size ?? 25, allowance)
-  const { data: queued } = await sb.from('messages').select('id').eq('campaign_id', campaignId).eq('status', 'queued').limit(size)
+  const { data: queued } = await sb
+    .from('messages')
+    .select('id')
+    .eq('campaign_id', campaignId)
+    .eq('status', 'queued')
+    .or(`send_after.is.null,send_after.lte.${new Date().toISOString()}`)
+    .limit(size)
   const ids = (queued ?? []).map((m: { id: string }) => m.id)
+  // Nothing due yet (best-time sends wait for their hour) or nothing left at all.
   if (!ids.length) return { processed: 0, remaining: await finishIfDone(campaignId) }
 
   const { data: claimed } = await sb.from('messages').update({ status: 'sending', updated_at: now() }).in('id', ids).eq('status', 'queued').select('id, email')
@@ -136,6 +145,14 @@ export async function processBatch(campaignId: string, opts: { size?: number; de
             fromName: settings.sender_name,
             campaignId,
             attachments,
+            icalEvent: campaign.event
+              ? buildIcs(campaign.event, {
+                  uid: `${campaignId}@unknowniitians.in`,
+                  organizer: campaign.reply_to || settings.reply_to || senderAddress(),
+                  organizerName: settings.sender_name,
+                  attendee: m.email,
+                })
+              : undefined,
           })
           await sb.from('messages').update({ ses_message_id: id, sent_at: now() }).eq('id', m.id)
           // Only move forward from 'sending': a delivery event may already have advanced it.

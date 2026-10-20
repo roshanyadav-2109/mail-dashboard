@@ -42,6 +42,8 @@ export type Outgoing = {
   fromName?: string
   campaignId?: string
   attachments?: Attachment[]
+  /** A calendar invite (.ics text) — mail apps show it with Yes / No / Maybe buttons. */
+  icalEvent?: string
 }
 
 /**
@@ -52,12 +54,13 @@ export async function sendEmail(o: Outgoing): Promise<string | undefined> {
   const token = makeToken(o.to, o.campaignId)
   const pageUrl = `${appUrl()}/unsubscribe/${token}`
   const oneClickUrl = `${appUrl()}/api/unsubscribe/${token}`
+  const prefsUrl = `${appUrl()}/preferences/${token}`
   const isText = o.format === 'text'
 
-  const footer = `<p style="font:12px Arial,sans-serif;color:#888;text-align:center;margin:24px 0">You received this email because your address is on our list. <a href="${pageUrl}" style="color:#888">Unsubscribe</a></p>`
+  const footer = `<p style="font:12px Arial,sans-serif;color:#888;text-align:center;margin:24px 0">You received this email because your address is on our list. <a href="${prefsUrl}" style="color:#888">Manage preferences</a> · <a href="${pageUrl}" style="color:#888">Unsubscribe</a></p>`
   const withFooter = /<\/body>/i.test(o.html) ? o.html.replace(/<\/body>/i, `${footer}</body>`) : o.html + footer
   const html = withPreheader(withFooter, o.preheader ?? '')
-  const text = `${isText ? o.text.trim() : (o.text.trim() || toText(o.html))}\n\n--\nUnsubscribe: ${pageUrl}`
+  const text = `${isText ? o.text.trim() : (o.text.trim() || toText(o.html))}\n\n--\nManage preferences: ${prefsUrl}\nUnsubscribe: ${pageUrl}`
 
   const headers = [
     { Name: 'List-Unsubscribe', Value: `<${oneClickUrl}>` },
@@ -68,7 +71,7 @@ export async function sendEmail(o: Outgoing): Promise<string | undefined> {
     EmailTags: o.campaignId ? [{ Name: 'campaign_id', Value: o.campaignId }] : undefined,
   }
 
-  if (o.attachments?.length) {
+  if (o.attachments?.length || o.icalEvent) {
     // SES "simple" messages can't carry files, so build the full MIME message.
     const mime = new MailComposer({
       from: fromHeader(o.fromName),
@@ -78,7 +81,8 @@ export async function sendEmail(o: Outgoing): Promise<string | undefined> {
       text,
       html: isText ? undefined : html,
       headers: Object.fromEntries(headers.map((h) => [h.Name, h.Value])),
-      attachments: o.attachments.map((a) => ({ filename: a.filename, content: a.content, contentType: a.contentType })),
+      attachments: (o.attachments ?? []).map((a) => ({ filename: a.filename, content: a.content, contentType: a.contentType })),
+      icalEvent: o.icalEvent ? { method: 'REQUEST', filename: 'invite.ics', content: o.icalEvent } : undefined,
     })
     const raw = await mime.compile().build()
     const res = await client.send(new SendEmailCommand({ ...common, Destination: { ToAddresses: [o.to] }, Content: { Raw: { Data: raw } } }))

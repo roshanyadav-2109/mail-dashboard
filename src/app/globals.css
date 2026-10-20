@@ -537,3 +537,23 @@ fieldset:disabled input, fieldset:disabled select { background: var(--hover); co
 .flag-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--line) }
 .flag-row:last-child { border-bottom: 0 }
 .flag-email { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+/* ── Contact timeline ── */
+.timeline { list-style: none; margin: 0; padding: 8px 20px 16px }
+.tl { display: grid; grid-template-columns: 14px 1fr auto; gap: 10px; align-items: baseline; padding: 8px 0; border-left: 0; position: relative }
+.tl + .tl { border-top: 1px solid var(--line) }
+.tl-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); transform: translateY(-1px) }
+.tl.good .tl-dot { background: var(--good) }
+.tl.bad .tl-dot { background: var(--bad) }
+.tl.warn .tl-dot { background: var(--warn) }
+.tl.muted .tl-dot { background: var(--line-strong) }
+.tl-text { min-width: 0; overflow-wrap: anywhere }
+.tl time { font-size: 12.5px; white-space: nowrap }
+@media (max-width: 900px) { .tl { grid-template-columns: 14px 1fr } .tl time { grid-column: 2 } }
+.invite-fields { display: grid; gap: 8px; margin-top: 8px }
+.invite-fields label { margin: 0; display: grid; gap: 4px }
+.invite-fields .check-row { display: flex }
+/* ── Domain health ── */
+.dns-check { padding: 16px 20px }
+.dns-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap }
+.dns-table code { font: 12.5px ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all }
+.dns-table td, .dns-table th { padding: 8px 10px }

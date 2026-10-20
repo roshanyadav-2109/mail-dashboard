@@ -1,4 +1,5 @@
 import { audit } from '@/lib/audit'
+import { bestTimes, nextIstHour } from '@/lib/besttime'
 import { resolveAudience, type Audience } from '@/lib/audience'
 import { db } from '@/lib/db'
 import type { Me } from '@/lib/guard'
@@ -26,12 +27,12 @@ export type CampaignRow = {
 
 type Result = { ok: true; status: string; recipients: number } | { ok: false; error: string }
 
-async function insertMessages(campaignId: string, emails: string[], status: 'queued' | 'suppressed') {
+async function insertMessages(campaignId: string, emails: string[], status: 'queued' | 'suppressed', sendAfter?: Map<string, string>) {
   for (let i = 0; i < emails.length; i += 500) {
     await db()
       .from('messages')
       .upsert(
-        emails.slice(i, i + 500).map((email) => ({ campaign_id: campaignId, email, status })),
+        emails.slice(i, i + 500).map((email) => ({ campaign_id: campaignId, email, status, send_after: sendAfter?.get(email) ?? null })),
         { onConflict: 'campaign_id,email', ignoreDuplicates: true },
       )
   }
@@ -41,7 +42,7 @@ async function insertMessages(campaignId: string, emails: string[], status: 'que
  * Turns a draft into a real send: checks the content, freezes the recipient list, then either starts sending,
  * schedules it, or parks it for approval when it is larger than the approval threshold.
  */
-export async function submitCampaign(id: string, me: Me, when: Date | null): Promise<Result> {
+export async function submitCampaign(id: string, me: Me, when: Date | null, mode: 'now' | 'smart' = 'now'): Promise<Result & { smart?: { personalised: number; total: number } }> {
   const sb = db()
   const { data } = await sb.from('campaigns').select('*').eq('id', id).maybeSingle()
   const c = data as CampaignRow | null
@@ -55,7 +56,20 @@ export async function submitCampaign(id: string, me: Me, when: Date | null): Pro
   const resolved = await resolveAudience(c.audience)
   if (!resolved.emails.length) return { ok: false, error: 'No one to send to: every recipient is suppressed or the audience is empty.' }
 
-  await insertMessages(id, resolved.emails, 'queued')
+  // Best-time mode: each person with enough history waits for their usual hour (within 24h of the start).
+  let sendAfter: Map<string, string> | undefined
+  let personalised = 0
+  if (mode === 'smart') {
+    const start = when && when.getTime() > Date.now() ? when : new Date()
+    const best = await bestTimes(resolved.emails)
+    sendAfter = new Map()
+    for (const email of resolved.emails) {
+      const b = best.get(email)
+      if (b) personalised++
+      sendAfter.set(email, (b ? nextIstHour(b.hour, start) : start).toISOString())
+    }
+  }
+  await insertMessages(id, resolved.emails, 'queued', sendAfter)
   await insertMessages(id, resolved.suppressed, 'suppressed')
 
   const settings = await getSettings()
@@ -68,6 +82,7 @@ export async function submitCampaign(id: string, me: Me, when: Date | null): Pro
     .update({
       status,
       scheduled_at: future ? when!.toISOString() : null,
+      send_mode: mode,
       approval: needsApproval ? { requested_by: me.email, requested_at: new Date().toISOString() } : null,
       updated_at: new Date().toISOString(),
     })
@@ -76,8 +91,10 @@ export async function submitCampaign(id: string, me: Me, when: Date | null): Pro
     recipients: resolved.emails.length,
     suppressed: resolved.suppressed.length,
     scheduled_at: future ? when!.toISOString() : null,
+    mode,
+    personalised,
   })
-  return { ok: true, status, recipients: resolved.emails.length }
+  return { ok: true, status, recipients: resolved.emails.length, smart: mode === 'smart' ? { personalised, total: resolved.emails.length } : undefined }
 }
 
 /** An admin approves or rejects a large send. The requester can't approve their own send unless they are an owner. */
@@ -129,6 +146,7 @@ export async function duplicateCampaign(id: string, me: Me): Promise<string | nu
       reply_to: c.reply_to,
       audience: c.audience,
       attachments: c.attachments,
+      event: (c as unknown as { event: unknown }).event ?? null,
       status: 'draft',
       created_by: me.email,
     })

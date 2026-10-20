@@ -1,3 +1,5 @@
+import { googleCalendarUrl, outlookCalendarUrl } from '@/lib/calendar'
+
 // Visual builder model and its HTML output. The HTML is table-based with inline styles, the format that renders
 // reliably in Gmail, Outlook (including Windows desktop) and Apple Mail. Browser-safe: used live in the editor.
 
@@ -12,6 +14,7 @@ export type Block =
   | { id: string; type: 'divider' }
   | { id: string; type: 'spacer'; height: number }
   | { id: string; type: 'footer'; text: string }
+  | { id: string; type: 'event'; title: string; start: string; end: string; allDay: boolean; location: string; details: string }
 
 export type Theme = { accent: string; background: string; card: string; text: string; font: string; width: number }
 export type Doc = { theme: Theme; blocks: Block[] }
@@ -48,6 +51,11 @@ export function newBlock(type: BlockType): Block {
       return { id, type, height: 24 }
     case 'footer':
       return { id, type, text: 'Unknown IITians · You’re receiving this because you signed up.' }
+    case 'event': {
+      const start = new Date(Date.now() + 86_400_000)
+      start.setMinutes(0, 0, 0)
+      return { id, type, title: 'Live session', start: start.toISOString(), end: new Date(start.getTime() + 3_600_000).toISOString(), allDay: false, location: 'Online', details: '' }
+    }
   }
 }
 
@@ -110,6 +118,23 @@ function blockHtml(b: Block, t: Theme): string {
       return `<tr><td style="height:${Math.max(4, Math.min(120, b.height))}px;font-size:0;line-height:0">&nbsp;</td></tr>`
     case 'footer':
       return cell(`<p style="margin:0;font-size:12px;line-height:1.5;color:#6b7280">${inline(b.text, t.accent)}</p>`, '20px 32px 24px', 'center')
+    case 'event': {
+      const ev = { title: b.title, start: b.start, end: b.end, allDay: b.allDay, location: b.location, description: b.details }
+      const fmt = (iso: string, withTime: boolean) =>
+        new Date(iso).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'full', ...(withTime ? { timeStyle: 'short' } : {}) })
+      const when = b.allDay ? fmt(b.start, false) : `${fmt(b.start, true)} – ${new Date(b.end).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', timeStyle: 'short' })} IST`
+      const btn = (href: string, label: string) =>
+        `<a href="${esc(href)}" style="display:inline-block;margin:4px 6px 0 0;padding:9px 16px;border:1px solid ${t.accent};border-radius:6px;color:${t.accent};font-family:${font};font-size:14px;font-weight:700;text-decoration:none">${label}</a>`
+      return cell(
+        `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid #e5e7eb;border-radius:8px"><tr><td style="padding:16px 18px;font-family:${font};color:${t.text}">` +
+          `<div style="font-size:17px;font-weight:700;margin-bottom:6px">📅 ${esc(b.title)}</div>` +
+          `<div style="font-size:14px;line-height:1.6">${esc(when)}${b.location ? `<br>📍 ${esc(b.location)}` : ''}</div>` +
+          (b.details ? `<div style="font-size:14px;line-height:1.6;margin-top:6px;color:#4b5563">${inline(b.details, t.accent)}</div>` : '') +
+          `<div style="margin-top:10px">${btn(googleCalendarUrl(ev), 'Add to Google Calendar')}${btn(outlookCalendarUrl(ev), 'Add to Outlook')}</div>` +
+          `</td></tr></table>`,
+        '12px 32px',
+      )
+    }
   }
 }
 
@@ -141,4 +166,5 @@ export const BLOCK_LABELS: Record<BlockType, string> = {
   divider: 'Divider',
   spacer: 'Spacer',
   footer: 'Footer',
+  event: 'Event / calendar',
 }

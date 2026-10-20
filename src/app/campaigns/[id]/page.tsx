@@ -70,6 +70,9 @@ export default async function Campaign({ params, searchParams }: { params: Promi
     sb.from('group_optouts').select('email', { count: 'exact', head: true }).eq('campaign_id', id),
   ])
   const limitHit = campaign.status === 'sending' && pending > 0 && today >= settings.daily_limit
+  // Best-time sends that are waiting for each person's hour.
+  const { data: waiting } = await sb.from('messages').select('send_after').eq('campaign_id', id).eq('status', 'queued').gt('send_after', new Date().toISOString()).order('send_after', { ascending: false }).limit(1)
+  const { count: waitingCount } = await sb.from('messages').select('id', { count: 'exact', head: true }).eq('campaign_id', id).eq('status', 'queued').gt('send_after', new Date().toISOString())
 
   const pct = (n: number) => (sent ? `${Math.round((n / sent) * 100)}%` : '—')
   const tiles: [string, string | number][] = [
@@ -110,7 +113,12 @@ export default async function Campaign({ params, searchParams }: { params: Promi
           {campaign.status === 'pending_approval' &&
             `Requested by ${campaign.approval?.requested_by} ${when(campaign.approval?.requested_at)}. ${canApprove ? 'You can approve it.' : 'Waiting for another admin.'}`}
           {campaign.status === 'rejected' && `Rejected by ${campaign.approval?.decided_by}${campaign.approval?.note ? ` — “${campaign.approval.note}”` : ''}.`}
-          {campaign.status === 'sending' && (limitHit ? 'Paused: daily send limit reached. Continues automatically after midnight.' : `${pending} still to send — runs in the background.`)}
+          {campaign.status === 'sending' &&
+            (limitHit
+              ? 'Paused: daily send limit reached. Continues automatically after midnight.'
+              : waitingCount
+                ? `${waitingCount} waiting for each person’s best time (last one ${when(waiting?.[0]?.send_after)}). ${pending - waitingCount} sending now.`
+                : `${pending} still to send — runs in the background.`)}
           {campaign.status === 'sent' && `Finished. ${sent} sent.`}
           {campaign.status === 'cancelled' && 'Cancelled. Emails already sent were not affected.'}
           {campaign.approval?.decision === 'approve' && ` Approved by ${campaign.approval.decided_by}.`}

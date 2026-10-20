@@ -1,5 +1,6 @@
 import type { Audience } from '@/lib/audience'
 import type { Doc } from '@/lib/blocks'
+import { cleanEvent, type CalendarEvent } from '@/lib/calendar'
 import type { StoredAttachment } from '@/lib/sender'
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -17,6 +18,7 @@ export type DraftInput = {
   audience?: Audience
   attachments?: StoredAttachment[]
   template_id?: string | null
+  event?: CalendarEvent | null
 }
 
 /** Validates and normalises the editable fields of a draft before they are stored. */
@@ -29,6 +31,7 @@ export function cleanDraft(d: DraftInput): { value: Record<string, unknown>; err
   if (d.text !== undefined) v.text = String(d.text).slice(0, 200_000)
   if (d.blocks !== undefined) v.blocks = d.blocks
   if (d.template_id !== undefined) v.template_id = d.template_id
+  if (d.event !== undefined) v.event = d.event ? cleanEvent(d.event) : null
   if (d.reply_to !== undefined) {
     const r = String(d.reply_to ?? '').trim().toLowerCase()
     if (r && !EMAIL.test(r)) return { value: v, error: 'Reply-to is not a valid email' }

@@ -4,6 +4,7 @@ import { db } from '@/lib/db'
 import { parseEmails } from '@/lib/emails'
 import { requireRole } from '@/lib/guard'
 import { atLeast } from '@/lib/roles'
+import { reportRecipients, sendWeeklyReport } from '@/lib/report'
 import { getSettings, saveSettings } from '@/lib/settings'
 
 import PageHead from '../page-head'
@@ -24,6 +25,7 @@ export default async function Settings({ searchParams }: { searchParams: Promise
   const { saved } = await searchParams
   const canEdit = atLeast(me.role, 'admin')
   const s = await getSettings()
+  const recipients = await reportRecipients()
   const { data: last } = await db().from('ses_events').select('created_at, event_type').order('created_at', { ascending: false }).limit(1)
   const lastEvent = last?.[0] as { created_at: string; event_type: string } | undefined
   const address = (process.env.SES_FROM ?? '').match(/<([^>]+)>/)?.[1] ?? process.env.SES_FROM ?? ''
@@ -31,7 +33,23 @@ export default async function Settings({ searchParams }: { searchParams: Promise
   return (
     <>
       <PageHead title="Settings" />
-      {saved && <div className="notice good-notice" style={{ marginBottom: 14 }}>Settings saved.</div>}
+      {saved && <div className="notice good-notice" style={{ marginBottom: 14 }}>{saved === 'report' ? 'Weekly report sent.' : 'Settings saved.'}</div>}
+      {canEdit && (
+        <form
+          style={{ marginBottom: 14 }}
+          action={async () => {
+            'use server'
+            await requireRole('admin')
+            await sendWeeklyReport()
+            const { redirect } = await import('next/navigation')
+            redirect('/settings?saved=report')
+          }}
+        >
+          <button className="ghost" type="submit">
+            Send this week’s report now
+          </button>
+        </form>
+      )}
 
       <form
         className="card"
@@ -49,6 +67,8 @@ export default async function Settings({ searchParams }: { searchParams: Promise
               approval_enabled: form.get('approval_enabled') === 'on',
               approval_threshold: threshold,
               test_recipients: parseEmails(String(form.get('test_recipients') ?? '')).slice(0, 10),
+              weekly_report: form.get('weekly_report') === 'on',
+              weekly_report_to: parseEmails(String(form.get('weekly_report_to') ?? '')).slice(0, 20),
             },
             actor.email,
           )
@@ -85,6 +105,14 @@ export default async function Settings({ searchParams }: { searchParams: Promise
           <label>
             Approval needed above (recipients)
             <input name="approval_threshold" type="number" min={1} defaultValue={s.approval_threshold} />
+          </label>
+          <label className="check">
+            <input name="weekly_report" type="checkbox" defaultChecked={s.weekly_report} />
+            Email a weekly report every Monday, 9 am
+          </label>
+          <label>
+            Weekly report goes to
+            <input name="weekly_report_to" defaultValue={s.weekly_report_to.join(', ')} placeholder={`All admins (${recipients.join(', ')})`} />
           </label>
           <label className="span-all">
             Default test recipients

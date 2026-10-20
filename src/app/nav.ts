@@ -35,6 +35,7 @@ export const NAV: NavGroup[] = [
     items: [
       { href: '/users', name: 'Users & roles', icon: 'shield', min: 'admin' },
       { href: '/activity', name: 'Activity log', icon: 'history', min: 'admin' },
+      { href: '/domain', name: 'Domain health', icon: 'shield', min: 'sender' },
       { href: '/settings', name: 'Settings', icon: 'settings', min: 'viewer' },
     ],
   },

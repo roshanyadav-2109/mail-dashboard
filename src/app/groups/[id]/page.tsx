@@ -15,7 +15,7 @@ import PanelLayout from '../../panel-layout'
 
 export const dynamic = 'force-dynamic'
 
-type Group = { id: string; name: string; description: string; created_at: string }
+type Group = { id: string; name: string; description: string; created_at: string; is_topic: boolean; topic_description: string }
 type Member = { contact_id: string; contacts: { id: string; email: string; name: string } | null }
 
 export default async function GroupDetail({
@@ -162,7 +162,16 @@ export default async function GroupDetail({
           const { data: clash } = await db().from('groups').select('id').eq('name', name).neq('id', id).maybeSingle()
           if (clash) redirect(`/groups/${id}?error=exists`)
           const description = String(form.get('description') ?? '').trim()
-          await db().from('groups').update({ name, description, updated_at: new Date().toISOString() }).eq('id', id)
+          await db()
+            .from('groups')
+            .update({
+              name,
+              description,
+              is_topic: form.get('is_topic') === 'on',
+              topic_description: String(form.get('topic_description') ?? '').trim().slice(0, 300),
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', id)
           await audit(actor.email, 'group.updated', { type: 'group', id }, { name })
           revalidatePath(`/groups/${id}`)
         }}
@@ -171,6 +180,10 @@ export default async function GroupDetail({
         {error === 'exists' && <div className="notice" style={{ marginBottom: 10 }}>Another group already uses that name.</div>}
         <input name="name" defaultValue={group.name} required aria-label="Group name" />
         <input name="description" defaultValue={group.description} placeholder="Description" aria-label="Description" style={{ marginTop: 8 }} />
+        <label className="check-row">
+          <input type="checkbox" name="is_topic" defaultChecked={group.is_topic} /> Show in the preference centre
+        </label>
+        <input name="topic_description" defaultValue={group.topic_description} placeholder="What subscribers get (shown to them)" aria-label="Topic description" style={{ marginTop: 8 }} />
         <div style={{ marginTop: 10 }}>
           <button className="ghost" type="submit">
             Save changes

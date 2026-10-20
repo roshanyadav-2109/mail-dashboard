@@ -1,18 +1,23 @@
 import { db } from '@/lib/db'
+import { checkQuality } from '@/lib/quality'
 
-export type Flag = { email: string; reason: 'bounce' | 'complaint' | 'unsubscribe' | 'manual' | 'left_group'; label: string; since: string }
+export type FlagReason = 'bounce' | 'complaint' | 'unsubscribe' | 'manual' | 'left_group' | 'typo' | 'disposable' | 'no_mail'
+export type Flag = { email: string; reason: FlagReason; label: string; since?: string; suggestion?: string }
 
-export const FLAG_LABEL: Record<Flag['reason'], string> = {
+export const FLAG_LABEL: Record<FlagReason, string> = {
   bounce: 'Bounced — the address doesn’t work',
   complaint: 'Marked your email as spam',
   unsubscribe: 'Unsubscribed',
   manual: 'Blocked by your team',
   left_group: 'Left this group',
+  typo: 'Looks like a typo',
+  disposable: 'Throwaway inbox',
+  no_mail: 'This domain can’t receive email',
 }
 
 /**
- * Which of these addresses are on the do-not-email list (or left the given group).
- * Used to warn before anyone adds them back by mistake.
+ * Addresses that need a second look before being added: on the do-not-email list, left the given group,
+ * or low quality (typo, throwaway inbox, dead domain).
  */
 export async function flagged(emails: string[], groupId?: string | null): Promise<Flag[]> {
   const list = [...new Set(emails.map((e) => e.trim().toLowerCase()).filter(Boolean))]
@@ -21,7 +26,7 @@ export async function flagged(emails: string[], groupId?: string | null): Promis
   for (let i = 0; i < list.length; i += 200) {
     const part = list.slice(i, i + 200)
     const { data } = await sb.from('suppressions').select('email, reason, created_at').in('email', part)
-    for (const r of (data ?? []) as { email: string; reason: Flag['reason']; created_at: string }[])
+    for (const r of (data ?? []) as { email: string; reason: FlagReason; created_at: string }[])
       out.set(r.email, { email: r.email, reason: r.reason, label: FLAG_LABEL[r.reason] ?? r.reason, since: r.created_at })
     if (groupId) {
       const { data: outs } = await sb.from('group_optouts').select('email, created_at').eq('group_id', groupId).in('email', part)
@@ -29,12 +34,23 @@ export async function flagged(emails: string[], groupId?: string | null): Promis
         if (!out.has(r.email)) out.set(r.email, { email: r.email, reason: 'left_group', label: FLAG_LABEL.left_group, since: r.created_at })
     }
   }
+  for (const q of await checkQuality(list.filter((e) => !out.has(e))))
+    out.set(q.email, { email: q.email, reason: q.reason, label: q.suggestion ? `${FLAG_LABEL.typo} — did you mean ${q.suggestion}?` : FLAG_LABEL[q.reason], suggestion: q.suggestion })
   return [...out.values()]
 }
 
-/** Server-side half of the warning: drop flagged addresses when the user chose "Skip these". */
+/**
+ * Server-side half of the warning, applied to what the user chose:
+ * "skip" drops every flagged address, "fix" corrects typos and drops the rest, "add" keeps everything.
+ */
 export async function applyFlagChoice(emails: string[], choice: FormDataEntryValue | null, groupId?: string | null): Promise<string[]> {
-  if (choice !== 'skip') return emails
-  const bad = new Set((await flagged(emails, groupId)).map((f) => f.email))
-  return emails.filter((e) => !bad.has(e.trim().toLowerCase()))
+  if (choice !== 'skip' && choice !== 'fix') return emails
+  const flags = new Map((await flagged(emails, groupId)).map((f) => [f.email, f]))
+  const out: string[] = []
+  for (const e of emails) {
+    const f = flags.get(e.trim().toLowerCase())
+    if (!f) out.push(e)
+    else if (choice === 'fix' && f.suggestion) out.push(f.suggestion)
+  }
+  return [...new Set(out)]
 }

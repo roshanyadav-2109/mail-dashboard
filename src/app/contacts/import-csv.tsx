@@ -81,9 +81,9 @@ export default function ImportCsv({ groups }: { groups: { id: string; name: stri
   }
 
   // Step 2: import, leaving out any addresses the user chose to skip.
-  async function doImport(skip: Set<string>) {
+  async function doImport(skip: Set<string>, fixes: Map<string, string> = new Map()) {
     setFlags(null)
-    const records = toRecords()
+    const records = toRecords().map((r) => (fixes.has(r.email) ? { ...r, email: fixes.get(r.email)! } : r))
     const valid = records.filter((r) => EMAIL.test(r.email) && !skip.has(r.email))
     setBusy(true)
     let imported = 0
@@ -158,6 +158,12 @@ export default function ImportCsv({ groups }: { groups: { id: string; name: stri
           flags={flags.list}
           total={flags.total}
           onSkip={() => doImport(new Set(flags.list.map((f) => f.email)))}
+          onFix={() =>
+            doImport(
+              new Set(flags.list.filter((f) => !f.suggestion).map((f) => f.email)),
+              new Map(flags.list.filter((f) => f.suggestion).map((f) => [f.email, f.suggestion!])),
+            )
+          }
           onAddAnyway={() => doImport(new Set())}
           onCancel={() => setFlags(null)}
           addAnywayLabel="Import anyway"

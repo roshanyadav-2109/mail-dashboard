@@ -1,10 +1,11 @@
 import { audit } from '@/lib/audit'
+import { buildIcs, cleanEvent } from '@/lib/calendar'
 import { db } from '@/lib/db'
 import { cleanDraft } from '@/lib/draft'
 import { apiRole } from '@/lib/guard'
 import { render, type MergeData } from '@/lib/render'
 import { loadAttachments, type StoredAttachment } from '@/lib/sender'
-import { sendEmail } from '@/lib/ses'
+import { sendEmail, senderAddress } from '@/lib/ses'
 import { getSettings } from '@/lib/settings'
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -18,6 +19,7 @@ type Body = {
   text: string
   reply_to?: string | null
   attachments?: StoredAttachment[]
+  event?: unknown
 }
 
 // Sends a test copy (subject prefixed with [Test]) to up to 10 addresses. Not recorded as a campaign.
@@ -33,6 +35,7 @@ export async function POST(req: Request) {
   if (error) return Response.json({ error }, { status: 400 })
 
   const settings = await getSettings()
+  const event = cleanEvent(b.event)
   const { data: people } = await db().from('contacts').select('email, name, fields').in('email', to)
   const byEmail = new Map(((people ?? []) as MergeData[]).map((p) => [p.email, p]))
   try {
@@ -49,6 +52,9 @@ export async function POST(req: Request) {
         replyTo: b.reply_to || settings.reply_to || null,
         fromName: settings.sender_name,
         attachments,
+        icalEvent: event
+          ? buildIcs(event, { uid: `test-${Date.now()}@unknowniitians.in`, organizer: b.reply_to || settings.reply_to || senderAddress(), organizerName: settings.sender_name, attendee: email })
+          : undefined,
       })
     }
     await audit(me.email, 'campaign.test_sent', { type: 'test' }, { to })

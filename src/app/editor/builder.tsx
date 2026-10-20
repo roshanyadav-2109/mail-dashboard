@@ -6,10 +6,17 @@ import { BLOCK_LABELS, FONTS, newBlock, uid, type Align, type Block, type BlockT
 
 import { uploadFile } from './upload'
 
-const ADDABLE: BlockType[] = ['heading', 'text', 'button', 'image', 'columns', 'divider', 'spacer', 'footer']
+// datetime-local value in the viewer's own timezone.
+const toLocal = (iso: string, dateOnly: boolean) => {
+  const d = new Date(iso)
+  const s = new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString()
+  return dateOnly ? s.slice(0, 10) : s.slice(0, 16)
+}
+
+const ADDABLE: BlockType[] = ['heading', 'text', 'button', 'image', 'columns', 'event', 'divider', 'spacer', 'footer']
 
 const snippet = (b: Block) => {
-  const t = 'text' in b ? b.text : b.type === 'button' ? b.label : b.type === 'image' ? b.alt : b.type === 'columns' ? b.left : ''
+  const t = 'text' in b ? b.text : b.type === 'button' ? b.label : b.type === 'image' ? b.alt : b.type === 'columns' ? b.left : b.type === 'event' ? b.title : ''
   return t.replace(/[*\[\]]/g, '').replace(/\(.*?\)/g, '').split('\n')[0].slice(0, 48)
 }
 
@@ -200,6 +207,33 @@ export default function Builder({ doc, onChange }: { doc: Doc; onChange: (d: Doc
               )}
               {b.type === 'footer' && <textarea rows={2} value={b.text} onChange={(e) => patch(b.id, { text: e.target.value })} />}
               {b.type === 'divider' && <span className="muted">A thin horizontal line.</span>}
+              {b.type === 'event' && (
+                <>
+                  <input value={b.title} onChange={(e) => patch(b.id, { title: e.target.value })} placeholder="Event title" />
+                  <label className="check-row" style={{ marginTop: 0 }}>
+                    <input type="checkbox" checked={b.allDay} onChange={(e) => patch(b.id, { allDay: e.target.checked })} /> All day
+                  </label>
+                  <div className="row">
+                    <input
+                      type={b.allDay ? 'date' : 'datetime-local'}
+                      value={toLocal(b.start, b.allDay)}
+                      onChange={(e) => e.target.value && patch(b.id, { start: new Date(e.target.value).toISOString() })}
+                      aria-label="Starts"
+                      style={{ flex: 1 }}
+                    />
+                    <input
+                      type={b.allDay ? 'date' : 'datetime-local'}
+                      value={toLocal(b.end, b.allDay)}
+                      onChange={(e) => e.target.value && patch(b.id, { end: new Date(e.target.value).toISOString() })}
+                      aria-label="Ends"
+                      style={{ flex: 1 }}
+                    />
+                  </div>
+                  <input value={b.location} onChange={(e) => patch(b.id, { location: e.target.value })} placeholder="Location or meeting link" />
+                  <textarea rows={2} value={b.details} onChange={(e) => patch(b.id, { details: e.target.value })} placeholder="Details (optional)" />
+                  <span className="muted">Shows the date with “Add to Google Calendar” and “Add to Outlook” buttons.</span>
+                </>
+              )}
             </div>
           )}
         </div>
