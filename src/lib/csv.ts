@@ -36,7 +36,8 @@ export function parseCsv(text: string): string[][] {
 /** CSV output with proper quoting. */
 export function toCsv(rows: (string | number | null | undefined)[][]): string {
   const q = (v: string | number | null | undefined) => {
-    const s = String(v ?? '')
+    // Text starting with = + - @ would run as a formula in Excel/Sheets (names come from public signup forms).
+    const s = typeof v === 'string' && /^[=+\-@\t\r]/.test(v) ? `'${v}` : String(v ?? '')
     return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
   }
   return rows.map((r) => r.map(q).join(',')).join('\r\n')

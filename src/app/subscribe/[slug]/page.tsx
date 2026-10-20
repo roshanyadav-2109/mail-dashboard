@@ -2,16 +2,19 @@ import { headers } from 'next/headers'
 import { notFound, redirect } from 'next/navigation'
 
 import { db } from '@/lib/db'
-import { clientIp, subscribe, type SignupForm } from '@/lib/subscribe'
+import { clientIp, resultMessage, subscribe, type SignupForm } from '@/lib/subscribe'
 
 export const dynamic = 'force-dynamic'
 
-export default async function SubscribePage({ params, searchParams }: { params: Promise<{ slug: string }>; searchParams: Promise<{ m?: string; e?: string }> }) {
+export default async function SubscribePage({ params, searchParams }: { params: Promise<{ slug: string }>; searchParams: Promise<{ r?: string }> }) {
   const { slug } = await params
-  const { m, e } = await searchParams
+  const { r } = await searchParams
   const { data } = await db().from('signup_forms').select('*').eq('slug', slug).maybeSingle()
   const form = data as SignupForm | null
   if (!form) notFound()
+  const shown = r ? resultMessage(form, r) : null
+  const m = shown && (r === 'done' || r === 'pending') ? shown : null
+  const e = shown && !m ? shown : null
 
   return (
     <div className="center">
@@ -22,7 +25,7 @@ export default async function SubscribePage({ params, searchParams }: { params: 
           'use server'
           const h = await headers()
           const r = await subscribe(form, { email: String(fd.get('email') ?? ''), name: String(fd.get('name') ?? ''), website: String(fd.get('website') ?? '') }, clientIp(h))
-          redirect(`/subscribe/${slug}?${r.ok ? 'm' : 'e'}=${encodeURIComponent(r.message)}`)
+          redirect(`/subscribe/${slug}?r=${r.code}`)
         }}
       >
         <div className="brand-mark" style={{ color: '#fff', margin: '0 0 16px' }}>
