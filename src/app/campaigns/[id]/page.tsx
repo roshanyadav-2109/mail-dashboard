@@ -57,11 +57,13 @@ export default async function Campaign({ params, searchParams }: { params: Promi
 
   let query = sb.from('messages').select('*').eq('campaign_id', id).order('email').limit(1000)
   if (status && STATUSES.includes(status)) query = query.eq('status', status)
-  const [{ data: messages }, { data: links }, settings, today] = await Promise.all([
+  const [{ data: messages }, { data: links }, settings, today, { count: unsubAll }, { count: unsubGroup }] = await Promise.all([
     query,
     sb.rpc('campaign_link_clicks', { cid: id }),
     getSettings(),
     sentToday(),
+    sb.from('suppressions').select('email', { count: 'exact', head: true }).eq('campaign_id', id).eq('reason', 'unsubscribe'),
+    sb.from('group_optouts').select('email', { count: 'exact', head: true }).eq('campaign_id', id),
   ])
   const limitHit = campaign.status === 'sending' && pending > 0 && today >= settings.daily_limit
 
@@ -73,6 +75,7 @@ export default async function Campaign({ params, searchParams }: { params: Promi
     ['Clicked', `${clicked} · ${pct(clicked)}`],
     ['Bounced', counts.bounced ?? 0],
     ['Complaints', counts.complained ?? 0],
+    ['Unsubscribed', (unsubAll ?? 0) + (unsubGroup ?? 0)],
     ['Failed', counts.failed ?? 0],
     ['Skipped', counts.suppressed ?? 0],
     ['Pending', pending],

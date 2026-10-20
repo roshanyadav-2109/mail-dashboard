@@ -2,67 +2,68 @@ import { redirect } from 'next/navigation'
 
 import { audit } from '@/lib/audit'
 import { db } from '@/lib/db'
-import { suppress } from '@/lib/suppress'
 import { readToken } from '@/lib/unsub'
+import { applyUnsubscribe, groupsFor } from '@/lib/unsubscribe'
 
 export const dynamic = 'force-dynamic'
-
-/** Groups the email arrived through (from the campaign's audience) that this person belongs to. */
-async function groupsFor(email: string, campaignId: string | null) {
-  if (!campaignId) return []
-  const sb = db()
-  const { data: c } = await sb.from('campaigns').select('audience').eq('id', campaignId).maybeSingle()
-  const ids: string[] = c?.audience?.groups ?? []
-  if (!ids.length) return []
-  const { data: contact } = await sb.from('contacts').select('id').eq('email', email).maybeSingle()
-  if (!contact) return []
-  const { data: rows } = await sb.from('group_members').select('group_id, groups(id, name)').eq('contact_id', contact.id).in('group_id', ids)
-  return ((rows ?? []) as unknown as { groups: { id: string; name: string } | null }[]).map((r) => r.groups).filter((g): g is { id: string; name: string } => !!g)
-}
 
 export default async function Unsubscribe({ params, searchParams }: { params: Promise<{ token: string }>; searchParams: Promise<{ done?: string }> }) {
   const { token } = await params
   const { done } = await searchParams
   const data = readToken(token)
-  const groups = data ? await groupsFor(data.email, data.campaignId) : []
+  const groups = data ? await groupsFor(data.email.toLowerCase(), data.campaignId) : []
+  const groupNames = groups.map((g) => g.name).join(', ')
 
   return (
     <div className="center">
-      <form
-        className="card login"
-        style={{ textAlign: 'left' }}
-        action={async (form) => {
-          'use server'
-          const d = readToken(token)
-          if (!d) return
-          const scope = String(form.get('scope') ?? 'all')
-          if (scope === 'all') {
-            await suppress(d.email, 'unsubscribe', 'unsubscribe page')
-            await audit(d.email, 'contact.unsubscribed', { type: 'contact', id: d.email }, { scope: 'all', campaign: d.campaignId })
-          } else {
-            const mine = await groupsFor(d.email, d.campaignId)
-            if (mine.length) {
-              await db()
-                .from('group_optouts')
-                .upsert(
-                  mine.map((g) => ({ group_id: g.id, email: d.email })),
-                  { onConflict: 'group_id,email', ignoreDuplicates: true },
-                )
-              await audit(d.email, 'contact.left_groups', { type: 'contact', id: d.email }, { groups: mine.map((g) => g.name) })
-            }
-          }
-          redirect(`/unsubscribe/${token}?done=${scope === 'all' ? 'all' : 'groups'}`)
-        }}
-      >
+      <div className="card login" style={{ textAlign: 'left' }}>
         <h1 style={{ marginBottom: 12 }}>Email preferences</h1>
         {!data ? (
           <p className="bad">This link is not valid.</p>
+        ) : done === 'undone' ? (
+          <p className="good">You’re subscribed again. Thanks for staying!</p>
         ) : done ? (
-          <p className="good">
-            {done === 'all' ? `${data.email} won’t receive any more emails from us.` : `${data.email} has left ${groups.map((g) => g.name).join(', ') || 'those groups'}.`}
-          </p>
-        ) : (
           <>
+            <p className="good" style={{ marginTop: 0 }}>
+              {done === 'groups' ? `${data.email} has left ${groupNames || 'those groups'}. You’ll still get our other emails.` : `${data.email} won’t receive any more emails from us.`}
+            </p>
+            {/* Undo: only the person holding this signed link can see it, so it is their own choice. */}
+            <form
+              action={async () => {
+                'use server'
+                const d = readToken(token)
+                if (!d) return
+                const email = d.email.toLowerCase()
+                const sb = db()
+                await sb.from('suppressions').delete().eq('email', email).eq('reason', 'unsubscribe')
+                const mine = await groupsFor(email, d.campaignId)
+                if (mine.length)
+                  await sb
+                    .from('group_optouts')
+                    .delete()
+                    .eq('email', email)
+                    .in(
+                      'group_id',
+                      mine.map((g) => g.id),
+                    )
+                await audit(email, 'contact.resubscribed', { type: 'contact', id: email }, { via: 'undo on unsubscribe page' })
+                redirect(`/unsubscribe/${token}?done=undone`)
+              }}
+            >
+              <button className="ghost" type="submit" style={{ width: '100%' }}>
+                Undo — keep me subscribed
+              </button>
+            </form>
+          </>
+        ) : (
+          <form
+            action={async (form) => {
+              'use server'
+              const scope = form.get('scope') === 'groups' ? 'groups' : 'all'
+              const r = await applyUnsubscribe(token, scope, 'page')
+              redirect(`/unsubscribe/${token}?done=${r.ok ? r.scope : 'all'}`)
+            }}
+          >
             <p className="muted" style={{ marginTop: 0 }}>
               {data.email}
             </p>
@@ -70,7 +71,7 @@ export default async function Unsubscribe({ params, searchParams }: { params: Pr
               <label className="check-row opt">
                 <input type="radio" name="scope" value="groups" defaultChecked />
                 <span>
-                  Stop emails sent to <strong>{groups.map((g) => g.name).join(', ')}</strong>
+                  Stop emails sent to <strong>{groupNames}</strong>
                   <span className="muted" style={{ display: 'block' }}>
                     You’ll still get other emails from us.
                   </span>
@@ -84,9 +85,9 @@ export default async function Unsubscribe({ params, searchParams }: { params: Pr
             <button type="submit" style={{ width: '100%', marginTop: 16 }}>
               Confirm
             </button>
-          </>
+          </form>
         )}
-      </form>
+      </div>
     </div>
   )
 }
