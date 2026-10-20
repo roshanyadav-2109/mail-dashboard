@@ -42,11 +42,15 @@ export default async function Campaign({ params, searchParams }: { params: Promi
   if (campaign.status === 'draft' && atLeast(me.role, 'sender')) redirect(`/compose?draft=${id}`)
 
   // Counters over every message; the table shows the first 1000 of the filtered view.
-  const { data: all } = await sb.from('messages').select('status, opens, clicks').eq('campaign_id', id).limit(100000)
+  const { data: all } = await sb.from('messages').select('status, opens, clicks, machine_opens, machine_clicks').eq('campaign_id', id).limit(100000)
   const counts: Record<string, number> = {}
   let opened = 0
   let clicked = 0
-  for (const m of (all ?? []) as { status: string; opens: number; clicks: number }[]) {
+  let machineOpens = 0
+  let machineClicks = 0
+  for (const m of (all ?? []) as { status: string; opens: number; clicks: number; machine_opens: number; machine_clicks: number }[]) {
+    machineOpens += m.machine_opens ?? 0
+    machineClicks += m.machine_clicks ?? 0
     counts[m.status] = (counts[m.status] ?? 0) + 1
     if (m.opens > 0) opened++
     if (m.clicks > 0) clicked++
@@ -122,6 +126,12 @@ export default async function Campaign({ params, searchParams }: { params: Promi
             </div>
           ))}
         </div>
+        {machineOpens + machineClicks > 0 && (
+          <div className="card-head muted" style={{ fontSize: 13, borderTop: '1px solid var(--line)' }}>
+            Opens and clicks count real people only. Filtered out {machineOpens} automatic open{machineOpens === 1 ? '' : 's'} and {machineClicks} link-scanner click
+            {machineClicks === 1 ? '' : 's'} (Gmail/Outlook security scans, Apple Mail Privacy).
+          </div>
+        )}
 
         {(links ?? []).length > 0 && (
           <>

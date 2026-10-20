@@ -1,3 +1,4 @@
+import { automatedReason } from '@/lib/bots'
 import { db } from '@/lib/db'
 import { isSnsUrl, verifySns, type SnsMessage } from '@/lib/sns'
 import { suppress } from '@/lib/suppress'
@@ -15,6 +16,8 @@ type SesEvent = {
   reject?: { reason: string }
   deliveryDelay?: { delayType: string }
   failure?: { errorMessage: string }
+  open?: { timestamp?: string; userAgent?: string; ipAddress?: string }
+  click?: { timestamp?: string; userAgent?: string; ipAddress?: string; link?: string }
 }
 
 export async function POST(req: Request) {
@@ -39,11 +42,14 @@ export async function POST(req: Request) {
   const sesId = event.mail?.messageId
   const sb = db()
 
-  const { data: message } = await sb.from('messages').select('id, email, status, opens, clicks').eq('ses_message_id', sesId).maybeSingle()
+  const { data: message } = await sb.from('messages').select('id, email, status, opens, clicks, machine_opens, machine_clicks, sent_at').eq('ses_message_id', sesId).maybeSingle()
   // The send route may not have saved the message id yet; a 500 makes SNS retry later.
   if (!message) return new Response('message not found yet', { status: 500 })
 
-  await sb.from('ses_events').insert({ ses_message_id: sesId, event_type: type, email: message.email, payload: event })
+  // Opens/clicks from scanners and privacy proxies are kept, but marked, so they don't inflate the real numbers.
+  const automated =
+    type === 'open' ? automatedReason('open', event.open ?? {}, message.sent_at) : type === 'click' ? automatedReason('click', event.click ?? {}, message.sent_at) : null
+  await sb.from('ses_events').insert({ ses_message_id: sesId, event_type: type, email: message.email, payload: event, automated })
 
   const now = new Date().toISOString()
   const update: Record<string, unknown> = { updated_at: now }
@@ -84,10 +90,12 @@ export async function POST(req: Request) {
       update.detail = `delayed: ${event.deliveryDelay?.delayType ?? 'unknown'}`
       break
     case 'open':
-      update.opens = message.opens + 1
+      if (automated) update.machine_opens = message.machine_opens + 1
+      else update.opens = message.opens + 1
       break
     case 'click':
-      update.clicks = message.clicks + 1
+      if (automated) update.machine_clicks = message.machine_clicks + 1
+      else update.clicks = message.clicks + 1
       break
   }
 
