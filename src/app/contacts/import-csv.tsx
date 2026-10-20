@@ -5,6 +5,8 @@ import { useState } from 'react'
 
 import { parseCsv } from '@/lib/csv'
 
+import { checkFlags, FlagDialog, type Flag } from '../flag-dialog'
+
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 type Kind = 'ignore' | 'email' | 'name' | 'tags' | 'field'
 const BATCH = 500
@@ -29,6 +31,7 @@ export default function ImportCsv({ groups }: { groups: { id: string; name: stri
   const [tag, setTag] = useState('')
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState('')
+  const [flags, setFlags] = useState<{ list: Flag[]; total: number } | null>(null)
 
   const headers = rows[0] ?? []
   const body = hasHeader ? rows.slice(1) : rows
@@ -62,9 +65,26 @@ export default function ImportCsv({ groups }: { groups: { id: string; name: stri
       .filter((r) => r.email)
   }
 
+  // Step 1: check for blocked addresses and ask before importing them.
   async function run() {
+    const valid = toRecords().filter((r) => EMAIL.test(r.email))
+    setBusy(true)
+    setResult('Checking addresses…')
+    const found = await checkFlags(valid.map((r) => r.email), group || null)
+    if (found.length) {
+      setFlags({ list: found, total: valid.length })
+      setResult('')
+      setBusy(false)
+      return
+    }
+    await doImport(new Set())
+  }
+
+  // Step 2: import, leaving out any addresses the user chose to skip.
+  async function doImport(skip: Set<string>) {
+    setFlags(null)
     const records = toRecords()
-    const valid = records.filter((r) => EMAIL.test(r.email))
+    const valid = records.filter((r) => EMAIL.test(r.email) && !skip.has(r.email))
     setBusy(true)
     let imported = 0
     try {
@@ -79,7 +99,7 @@ export default function ImportCsv({ groups }: { groups: { id: string; name: stri
         if (!res.ok) throw new Error(data.error ?? 'import failed')
         imported += data.imported
       }
-      setResult(`Imported ${imported} contacts${records.length - valid.length ? ` · ${records.length - valid.length} rows skipped (invalid email)` : ''}.`)
+      setResult(`Imported ${imported} contacts${skip.size ? ` · ${skip.size} blocked addresses skipped` : ''}${records.length - valid.length - skip.size > 0 ? ` · ${records.length - valid.length - skip.size} rows had no valid email` : ''}.`)
       setRows([])
       router.refresh()
     } catch (e) {
@@ -133,6 +153,16 @@ export default function ImportCsv({ groups }: { groups: { id: string; name: stri
         </>
       )}
       {result && <p className="muted">{result}</p>}
+      {flags && (
+        <FlagDialog
+          flags={flags.list}
+          total={flags.total}
+          onSkip={() => doImport(new Set(flags.list.map((f) => f.email)))}
+          onAddAnyway={() => doImport(new Set())}
+          onCancel={() => setFlags(null)}
+          addAnywayLabel="Import anyway"
+        />
+      )}
     </div>
   )
 }

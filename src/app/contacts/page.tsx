@@ -4,9 +4,11 @@ import { revalidatePath } from 'next/cache'
 import { audit } from '@/lib/audit'
 import { fetchAll, upsertContacts } from '@/lib/audience'
 import { db } from '@/lib/db'
+import { applyFlagChoice } from '@/lib/flags'
 import { requireRole } from '@/lib/guard'
 import { atLeast } from '@/lib/roles'
 
+import { CheckedForm } from '../flag-dialog'
 import PanelLayout from '../panel-layout'
 import ImportCsv from './import-csv'
 
@@ -131,13 +133,14 @@ export default async function Contacts({ searchParams }: { searchParams: Promise
 
   const panel = (
     <>
-      <form
+      <CheckedForm
         className="panel-sec"
         action={async (form) => {
           'use server'
           const actor = await requireRole('sender')
           const email = String(form.get('email') ?? '').trim().toLowerCase()
           if (!EMAIL.test(email)) return
+          if (!(await applyFlagChoice([email], form.get('flag_choice'))).length) return
           const tagsIn = String(form.get('tags') ?? '')
             .split(',')
             .map((t) => t.trim())
@@ -154,7 +157,7 @@ export default async function Contacts({ searchParams }: { searchParams: Promise
         <div style={{ marginTop: 10 }}>
           <button type="submit">Add contact</button>
         </div>
-      </form>
+      </CheckedForm>
       <div className="panel-sec">
         <div className="panel-label">Import CSV</div>
         <ImportCsv groups={(groups ?? []) as { id: string; name: string }[]} />

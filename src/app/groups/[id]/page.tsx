@@ -6,9 +6,11 @@ import { audit } from '@/lib/audit'
 import { addToGroup, fetchAll, upsertContacts } from '@/lib/audience'
 import { db } from '@/lib/db'
 import { parseEmails } from '@/lib/emails'
+import { applyFlagChoice } from '@/lib/flags'
 import { requireRole } from '@/lib/guard'
 import { atLeast } from '@/lib/roles'
 
+import { CheckedForm } from '../../flag-dialog'
 import PanelLayout from '../../panel-layout'
 
 export const dynamic = 'force-dynamic'
@@ -128,14 +130,14 @@ export default async function GroupDetail({
 
   const manage = (
     <>
-      <form
+      <CheckedForm groupId={id}
         className="panel-sec"
         action={async (form) => {
           'use server'
           const actor = await requireRole('sender')
           const file = form.get('file')
           const fromFile = file instanceof File && file.size > 0 ? await file.text() : ''
-          const added = parseEmails(`${form.get('emails') ?? ''} ${fromFile}`)
+          const added = await applyFlagChoice(parseEmails(`${form.get('emails') ?? ''} ${fromFile}`), form.get('flag_choice'), id)
           const ids = await upsertContacts(added.map((email) => ({ email })))
           await addToGroup(id, [...ids.values()])
           await audit(actor.email, 'group.members_added', { type: 'group', id }, { count: ids.size })
@@ -148,7 +150,7 @@ export default async function GroupDetail({
         <div style={{ marginTop: 10 }}>
           <button type="submit">Add to group</button>
         </div>
-      </form>
+      </CheckedForm>
 
       <form
         className="panel-sec"

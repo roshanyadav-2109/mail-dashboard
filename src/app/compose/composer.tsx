@@ -9,6 +9,7 @@ import { lint } from '@/lib/lint'
 import { SAMPLE, type MergeData } from '@/lib/render'
 
 import EmailEditor from '../editor/email-editor'
+import { checkFlags, FlagDialog, type Flag } from '../flag-dialog'
 import { uploadFile } from '../editor/upload'
 import Icon from '../icons'
 
@@ -62,6 +63,7 @@ export default function Composer(props: {
   const [uploading, setUploading] = useState(false)
   const [when, setWhen] = useState<'now' | 'later'>('now')
   const [at, setAt] = useState(localInput(new Date(Date.now() + 60 * 60_000)))
+  const [pendingAdd, setPendingAdd] = useState<{ list: string[]; flags: Flag[] } | null>(null)
 
   // ── Live recipient preview ────────────────────────────────────────────────
   const audienceKey = JSON.stringify(audience)
@@ -141,6 +143,13 @@ export default function Composer(props: {
     setAudience((a) => ({ ...a, [key]: a[key].includes(id) ? a[key].filter((x) => x !== id) : [...a[key], id] }))
   const addEmails = (list: string[]) =>
     setAudience((a) => ({ ...a, emails: [...new Set([...a.emails, ...list])], exclude: (a.exclude ?? []).filter((e) => !list.includes(e)) }))
+  // Typed or uploaded addresses: warn if any are blocked before adding them.
+  const addChecked = async (list: string[]) => {
+    if (!list.length) return
+    const flags = await checkFlags(list)
+    if (flags.length) setPendingAdd({ list, flags })
+    else addEmails(list)
+  }
   const removeOne = (email: string) =>
     setAudience((a) => (a.emails.includes(email) ? { ...a, emails: a.emails.filter((e) => e !== email) } : { ...a, exclude: [...new Set([...(a.exclude ?? []), email])] }))
   const restore = (email: string) => setAudience((a) => ({ ...a, exclude: (a.exclude ?? []).filter((e) => e !== email) }))
@@ -249,9 +258,26 @@ export default function Composer(props: {
         <button className="ghost" disabled={busy} onClick={sendTest}>
           Send test
         </button>
-        <button disabled={busy || count === 0} onClick={() => setDialog(true)}>
+        <button
+          className="ghost"
+          disabled={busy || count === 0}
+          onClick={() => {
+            setWhen('later')
+            setDialog(true)
+          }}
+        >
+          <Icon name="history" size={16} />
+          Schedule
+        </button>
+        <button
+          disabled={busy || count === 0}
+          onClick={() => {
+            setWhen('now')
+            setDialog(true)
+          }}
+        >
           <Icon name="send" size={16} />
-          Send…
+          Send
         </button>
       </div>
 
@@ -344,7 +370,7 @@ export default function Composer(props: {
               <div className="row" style={{ marginTop: 8 }}>
                 <button
                   onClick={() => {
-                    addEmails(extract(manual))
+                    void addChecked(extract(manual))
                     setManual('')
                   }}
                 >
@@ -358,7 +384,7 @@ export default function Composer(props: {
                     hidden
                     onChange={async (e) => {
                       const f = e.target.files?.[0]
-                      if (f) addEmails(extract(await f.text()))
+                      if (f) await addChecked(extract(await f.text()))
                       e.target.value = ''
                     }}
                   />
@@ -462,11 +488,30 @@ export default function Composer(props: {
         </aside>
       )}
 
+      {pendingAdd && (
+        <FlagDialog
+          flags={pendingAdd.flags}
+          total={pendingAdd.list.length}
+          note="These people asked not to be emailed, or their address doesn’t work. They will be skipped when you send even if you keep them."
+          onSkip={() => {
+            const bad = new Set(pendingAdd.flags.map((f) => f.email))
+            addEmails(pendingAdd.list.filter((e) => !bad.has(e)))
+            setPendingAdd(null)
+          }}
+          onAddAnyway={() => {
+            addEmails(pendingAdd.list)
+            setPendingAdd(null)
+          }}
+          onCancel={() => setPendingAdd(null)}
+          addAnywayLabel="Keep them in the list"
+        />
+      )}
+
       {dialog && (
         <div className="modal-back" onMouseDown={() => !busy && setDialog(false)}>
           <div className="modal card" role="dialog" aria-modal="true" aria-labelledby="send-title" onMouseDown={(e) => e.stopPropagation()}>
             <div className="ws-panel-head">
-              <h2 id="send-title">Send “{content.subject || '(no subject)'}”</h2>
+              <h2 id="send-title">{when === 'later' ? 'Schedule' : 'Send'} “{content.subject || '(no subject)'}”</h2>
               <button type="button" className="icon-btn" onClick={() => setDialog(false)} aria-label="Close">
                 ×
               </button>

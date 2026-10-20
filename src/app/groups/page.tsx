@@ -5,9 +5,11 @@ import { audit } from '@/lib/audit'
 import { addToGroup, upsertContacts } from '@/lib/audience'
 import { db } from '@/lib/db'
 import { parseEmails } from '@/lib/emails'
+import { applyFlagChoice } from '@/lib/flags'
 import { requireRole } from '@/lib/guard'
 import { atLeast } from '@/lib/roles'
 
+import { CheckedForm } from '../flag-dialog'
 import PanelLayout from '../panel-layout'
 
 export const dynamic = 'force-dynamic'
@@ -64,7 +66,7 @@ export default async function Groups({ searchParams }: { searchParams: Promise<{
   )
 
   const form = (
-    <form
+    <CheckedForm
       className="panel-sec"
       action={async (form) => {
         'use server'
@@ -72,7 +74,7 @@ export default async function Groups({ searchParams }: { searchParams: Promise<{
         const name = String(form.get('name') ?? '').trim()
         const file = form.get('file')
         const fromFile = file instanceof File && file.size > 0 ? await file.text() : ''
-        const emails = parseEmails(`${form.get('emails') ?? ''} ${fromFile}`)
+        const emails = await applyFlagChoice(parseEmails(`${form.get('emails') ?? ''} ${fromFile}`), form.get('flag_choice'))
         if (!name) redirect('/groups?error=name')
         const sb = db()
         const { data: existing } = await sb.from('groups').select('id').eq('name', name).maybeSingle()
@@ -102,7 +104,7 @@ export default async function Groups({ searchParams }: { searchParams: Promise<{
       <div style={{ marginTop: 12 }}>
         <button type="submit">Create group</button>
       </div>
-    </form>
+    </CheckedForm>
   )
 
   return (
