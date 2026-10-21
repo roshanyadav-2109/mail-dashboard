@@ -158,7 +158,9 @@ export async function processBatch(campaignId: string, opts: { size?: number; de
             icalEvent: campaign.event
               ? buildIcs(campaign.event, {
                   uid: `${campaignId}@unknowniitians.in`,
-                  organizer: campaign.reply_to || settings.reply_to || senderAddress(),
+                  // The organiser must be the sending address: Gmail only treats an invite as genuine (and adds it to the
+                  // calendar) when it matches the authenticated sender. RSVPs reach desk@ via forwarding of this address.
+                  organizer: senderAddress(),
                   organizerName: settings.sender_name,
                   attendee: m.email,
                 })

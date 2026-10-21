@@ -53,7 +53,7 @@ export async function POST(req: Request) {
         fromName: settings.sender_name,
         attachments,
         icalEvent: event
-          ? buildIcs(event, { uid: `test-${Date.now()}@unknowniitians.in`, organizer: b.reply_to || settings.reply_to || senderAddress(), organizerName: settings.sender_name, attendee: email })
+          ? buildIcs(event, { uid: `test-${Date.now()}@unknowniitians.in`, organizer: senderAddress(), organizerName: settings.sender_name, attendee: email })
           : undefined,
       })
     }
