@@ -1,6 +1,10 @@
+import { revalidatePath } from 'next/cache'
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 
+import { audit } from '@/lib/audit'
+import { addToGroup, fetchAll, upsertContacts } from '@/lib/audience'
+import { ENGAGEMENT, filterParams, filteredEmails, isFiltered, linkLabel, readFilter, recipientsQuery, SORTS, STATUSES } from '@/lib/campaign-filter'
 import type { CampaignRow } from '@/lib/campaigns'
 import { db } from '@/lib/db'
 import { requireRole } from '@/lib/guard'
@@ -14,7 +18,6 @@ import CampaignActions from './actions'
 
 export const dynamic = 'force-dynamic'
 
-const STATUSES = ['queued', 'sending', 'sent', 'delivered', 'bounced', 'complained', 'failed', 'suppressed']
 const LABEL: Record<string, string> = {
   draft: 'Draft',
   scheduled: 'Scheduled',
@@ -30,10 +33,19 @@ type Message = { id: string; email: string; status: string; error: string | null
 const when = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : '—')
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;')
 
-export default async function Campaign({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ run?: string; status?: string }> }) {
+export default async function Campaign({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Record<string, string | undefined>> }) {
   const me = await requireRole('viewer')
   const { id } = await params
-  const { run, status } = await searchParams
+  const sp = await searchParams
+  const { run, saved } = sp
+  const filter = readFilter(sp)
+  const filtered = isFiltered(filter)
+  const href = (patch: Record<string, string | undefined>) => {
+    const q = filterParams({ ...filter, ...patch } as typeof filter)
+    for (const [k, v] of Object.entries(patch)) if (!v) q.delete(k)
+    const str = q.toString()
+    return `/campaigns/${id}${str ? `?${str}` : ''}`
+  }
   const sb = db()
 
   const { data } = await sb.from('campaigns').select('*').eq('id', id).maybeSingle()
@@ -41,28 +53,36 @@ export default async function Campaign({ params, searchParams }: { params: Promi
   if (!campaign) notFound()
   if (campaign.status === 'draft' && atLeast(me.role, 'sender')) redirect(`/compose?draft=${id}`)
 
-  // Counters over every message; the table shows the first 1000 of the filtered view.
-  const { data: all } = await sb.from('messages').select('status, opens, clicks, machine_opens, machine_clicks').eq('campaign_id', id).limit(100000)
+  // Counters over every message (paged: the API returns at most 1000 rows per request).
+  const all = await fetchAll<{ status: string; opens: number; clicks: number; machine_opens: number; machine_clicks: number }>((from, to) =>
+    sb.from('messages').select('status, opens, clicks, machine_opens, machine_clicks').eq('campaign_id', id).order('id').range(from, to),
+  )
   const counts: Record<string, number> = {}
   let opened = 0
   let clicked = 0
+  let notOpened = 0
+  let notClicked = 0
+  let openedNotClicked = 0
   let machineOpens = 0
   let machineClicks = 0
-  for (const m of (all ?? []) as { status: string; opens: number; clicks: number; machine_opens: number; machine_clicks: number }[]) {
+  for (const m of all) {
     machineOpens += m.machine_opens ?? 0
     machineClicks += m.machine_clicks ?? 0
     counts[m.status] = (counts[m.status] ?? 0) + 1
     if (m.opens > 0) opened++
     if (m.clicks > 0) clicked++
+    const reached = m.status === 'sent' || m.status === 'delivered'
+    if (reached && m.opens === 0) notOpened++
+    if (reached && m.clicks === 0) notClicked++
+    if (m.opens > 0 && m.clicks === 0) openedNotClicked++
   }
-  const total = all?.length ?? 0
+  const engageCount: Record<string, number> = { opened, not_opened: notOpened, clicked, not_clicked: notClicked, opened_not_clicked: openedNotClicked }
+  const total = all.length
   const pending = (counts.queued ?? 0) + (counts.sending ?? 0)
   const sent = (counts.sent ?? 0) + (counts.delivered ?? 0) + (counts.bounced ?? 0) + (counts.complained ?? 0)
 
-  let query = sb.from('messages').select('*').eq('campaign_id', id).order('email').limit(1000)
-  if (status && STATUSES.includes(status)) query = query.eq('status', status)
-  const [{ data: messages }, { data: links }, settings, today, { count: unsubAll }, { count: unsubGroup }] = await Promise.all([
-    query,
+  const [{ data: messages, count: matching }, { data: links }, settings, today, { count: unsubAll }, { count: unsubGroup }] = await Promise.all([
+    recipientsQuery(id, filter, '*', 'exact').limit(1000),
     sb.rpc('campaign_link_clicks', { cid: id }),
     getSettings(),
     sentToday(),
@@ -88,7 +108,19 @@ export default async function Campaign({ params, searchParams }: { params: Promi
     ['Pending', pending],
   ]
 
+  // Personal unsubscribe/preference links are folded into one row each; real links can be used as a filter.
+  const linkRows = new Map<string, { label: string; link: string | null; clicks: number; people: number }>()
+  for (const l of (links ?? []) as { link: string; clicks: number; people: number }[]) {
+    const label = linkLabel(l.link)
+    const personal = label === 'Unsubscribe link' || label === 'Preferences link'
+    const row = linkRows.get(personal ? label : l.link) ?? { label, link: personal ? null : l.link, clicks: 0, people: 0 }
+    row.clicks += Number(l.clicks)
+    row.people += Number(l.people)
+    linkRows.set(personal ? label : l.link, row)
+  }
+
   const canSend = atLeast(me.role, 'sender')
+  const { data: groupList } = canSend ? await sb.from('groups').select('id, name').order('name') : { data: [] }
   const canApprove = atLeast(me.role, 'admin') && (campaign.approval?.requested_by !== me.email || isOwner(me.email))
   const body =
     campaign.format === 'text'
@@ -141,7 +173,7 @@ export default async function Campaign({ params, searchParams }: { params: Promi
           </div>
         )}
 
-        {(links ?? []).length > 0 && (
+        {linkRows.size > 0 && (
           <>
             <div className="card-head" style={{ borderTop: '1px solid var(--line)' }}>
               <h2>Link clicks</h2>
@@ -156,12 +188,21 @@ export default async function Campaign({ params, searchParams }: { params: Promi
                   </tr>
                 </thead>
                 <tbody>
-                  {(links as { link: string; clicks: number; people: number }[]).map((l) => (
-                    <tr key={l.link}>
+                  {[...linkRows.values()].map((l) => (
+                    <tr key={l.label + (l.link ?? '')}>
                       <td className="cell-url">
-                        <a className="link" href={l.link} target="_blank" rel="noreferrer">
-                          {l.link}
-                        </a>
+                        {l.link ? (
+                          <>
+                            <Link className="link" href={href({ link: l.link, engage: undefined })} title="Show who clicked this link">
+                              {l.label}
+                            </Link>{' '}
+                            <a className="muted" href={l.link} target="_blank" rel="noreferrer" aria-label="Open link">
+                              ↗
+                            </a>
+                          </>
+                        ) : (
+                          <span>{l.label}</span>
+                        )}
                       </td>
                       <td className="num">{l.clicks}</td>
                       <td className="num">{l.people}</td>
@@ -182,19 +223,113 @@ export default async function Campaign({ params, searchParams }: { params: Promi
         </details>
 
         <div className="card-head" style={{ borderTop: '1px solid var(--line)' }}>
-          <div className="pills">
-            <Link className={`pill${!status ? ' on' : ''}`} href={`/campaigns/${id}`}>
-              All ({total})
-            </Link>
-            {STATUSES.filter((s) => counts[s]).map((s) => (
-              <Link key={s} className={`pill${status === s ? ' on' : ''}`} href={`/campaigns/${id}?status=${s}`}>
-                {s} ({counts[s]})
-              </Link>
-            ))}
-          </div>
+          <h2>Recipients</h2>
+          <span className="muted">
+            {filtered ? `${matching ?? 0} of ${total} match` : `${total} total`}
+            {(matching ?? 0) > 1000 ? ' · showing first 1000' : ''}
+          </span>
         </div>
-        {total === 0 ? (
-          <div className="empty">No recipients.</div>
+        <div className="card-head pills" style={{ justifyContent: 'flex-start' }}>
+          <Link className={`pill${!filter.engage ? ' on' : ''}`} href={href({ engage: undefined })}>
+            Anyone
+          </Link>
+          {(Object.keys(ENGAGEMENT) as (keyof typeof ENGAGEMENT)[]).map((k) => (
+            <Link key={k} className={`pill${filter.engage === k ? ' on' : ''}`} href={href({ engage: k })}>
+              {ENGAGEMENT[k]} · {engageCount[k]}
+            </Link>
+          ))}
+        </div>
+        <form className="card-head filter-bar" method="get">
+          <input name="q" defaultValue={filter.q} placeholder="Email contains, e.g. 25f1" aria-label="Search email" />
+          <select name="status" defaultValue={filter.status ?? ''} aria-label="Status">
+            <option value="">Any status</option>
+            {STATUSES.filter((s) => counts[s]).map((s) => (
+              <option key={s} value={s}>
+                {s} ({counts[s]})
+              </option>
+            ))}
+          </select>
+          <select name="engage" defaultValue={filter.engage ?? ''} aria-label="Engagement">
+            <option value="">Any engagement</option>
+            {(Object.keys(ENGAGEMENT) as (keyof typeof ENGAGEMENT)[]).map((k) => (
+              <option key={k} value={k}>
+                {ENGAGEMENT[k]}
+              </option>
+            ))}
+          </select>
+          {[...linkRows.values()].some((l) => l.link) && (
+            <select name="link" defaultValue={filter.link ?? ''} aria-label="Clicked link">
+              <option value="">Any link</option>
+              {[...linkRows.values()]
+                .filter((l) => l.link)
+                .map((l) => (
+                  <option key={l.link} value={l.link ?? ''}>
+                    Clicked {l.label} ({l.people})
+                  </option>
+                ))}
+            </select>
+          )}
+          <select name="sort" defaultValue={filter.sort ?? 'email'} aria-label="Sort">
+            {(Object.keys(SORTS) as (keyof typeof SORTS)[]).map((k) => (
+              <option key={k} value={k}>
+                {SORTS[k]}
+              </option>
+            ))}
+          </select>
+          <button className="ghost" type="submit">
+            Apply
+          </button>
+          {filtered && (
+            <Link className="btn ghost" href={`/campaigns/${id}`}>
+              Clear
+            </Link>
+          )}
+        </form>
+        {(matching ?? 0) > 0 && (
+          <div className="bulk-bar">
+            <span>
+              <b>{matching}</b> {filtered ? 'matching' : ''} recipient{matching === 1 ? '' : 's'}
+            </span>
+            <a className="btn ghost" href={`/api/export/campaign/${id}?${filterParams(filter)}`}>
+              Export CSV
+            </a>
+            {canSend && (
+              <form
+                className="row"
+                action={async (fd) => {
+                  'use server'
+                  const actor = await requireRole('sender')
+                  const name = String(fd.get('name') ?? '').trim().slice(0, 120)
+                  if (!name) return
+                  const emails = await filteredEmails(id, filter)
+                  if (!emails.length) return
+                  const sb2 = db()
+                  const { data: existing } = await sb2.from('groups').select('id').eq('name', name).maybeSingle()
+                  const groupId = existing?.id ?? (await sb2.from('groups').insert({ name, description: 'Saved from a campaign filter' }).select('id').single()).data?.id
+                  if (!groupId) return
+                  const ids = await upsertContacts(emails.map((email) => ({ email })), `campaign:${id}`)
+                  await addToGroup(groupId, [...ids.values()])
+                  await audit(actor.email, 'group.members_added', { type: 'group', id: groupId }, { from_campaign: id, filter, count: emails.length })
+                  revalidatePath(`/campaigns/${id}`)
+                  redirect(`${href({})}${href({}).includes('?') ? '&' : '?'}saved=${encodeURIComponent(name)}`)
+                }}
+              >
+                <input name="name" list="campaign-groups" placeholder="Group name, new or existing" required aria-label="Group name" style={{ width: 220 }} />
+                <datalist id="campaign-groups">
+                  {(groupList ?? []).map((g: { id: string; name: string }) => (
+                    <option key={g.id} value={g.name} />
+                  ))}
+                </datalist>
+                <button className="ghost" type="submit" title="Adds these people to a group, e.g. to follow up with everyone who didn’t open">
+                  Save as group
+                </button>
+              </form>
+            )}
+            {saved && <span className="good">Added to “{saved}”</span>}
+          </div>
+        )}
+        {(messages ?? []).length === 0 ? (
+          <div className="empty">{filtered ? 'Nobody matches these filters.' : 'No recipients.'}</div>
         ) : (
           <div className="scroll">
             <table>
@@ -209,7 +344,7 @@ export default async function Campaign({ params, searchParams }: { params: Promi
                 </tr>
               </thead>
               <tbody>
-                {((messages ?? []) as Message[]).map((m) => (
+                {((messages ?? []) as unknown as Message[]).map((m) => (
                   <tr key={m.id}>
                     <td>{m.email}</td>
                     <td>

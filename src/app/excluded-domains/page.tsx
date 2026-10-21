@@ -8,6 +8,7 @@ import { requireRole } from '@/lib/guard'
 import { atLeast } from '@/lib/roles'
 
 import PanelLayout from '../panel-layout'
+import { Selected, SelectAll } from '../select-all'
 
 export const dynamic = 'force-dynamic'
 
@@ -40,6 +41,26 @@ export default async function ExcludedDomains({ searchParams }: { searchParams: 
           {skipped ? ` · already on the list: ${skipped}` : ''}
         </div>
       )}
+      {canEdit && rows.length > 0 && (
+        <form
+          id="excl-bulk"
+          action={async (fd) => {
+            'use server'
+            const actor = await requireRole('sender')
+            const patterns = [...new Set(fd.getAll('pattern').map(String))].slice(0, 500)
+            if (!patterns.length) return
+            await db().from('excluded_domains').delete().in('pattern', patterns)
+            await audit(actor.email, 'domain.unexcluded', { type: 'domain' }, { patterns })
+            revalidatePath('/excluded-domains')
+          }}
+        >
+          <Selected total={rows.length} name="pattern">
+            <button className="ghost danger-text" type="submit" title="These addresses can be emailed again">
+              Remove selected rules
+            </button>
+          </Selected>
+        </form>
+      )}
       {rows.length === 0 ? (
         <div className="empty">No exclusions. Every address can be emailed.</div>
       ) : (
@@ -47,6 +68,11 @@ export default async function ExcludedDomains({ searchParams }: { searchParams: 
           <table>
             <thead>
               <tr>
+                {canEdit && (
+                  <th style={{ width: 32 }}>
+                    <SelectAll name="pattern" form="excl-bulk" />
+                  </th>
+                )}
                 <th>Rule</th>
                 <th className="num">Contacts left out</th>
                 <th className="hide-sm">Note</th>
@@ -59,6 +85,11 @@ export default async function ExcludedDomains({ searchParams }: { searchParams: 
                 const hits = affected.get(r.pattern) ?? []
                 return (
                   <tr key={r.pattern}>
+                    {canEdit && (
+                      <td>
+                        <input type="checkbox" name="pattern" form="excl-bulk" value={r.pattern} aria-label={`Select ${showPattern(r.pattern)}`} />
+                      </td>
+                    )}
                     <td>
                       <strong>{showPattern(r.pattern)}</strong>
                       <div className="muted">{isTextRule(r.pattern) ? 'anywhere in the email address' : r.pattern.startsWith('.') ? `subdomains of ${r.pattern.slice(1)} only` : 'this exact domain only'}</div>

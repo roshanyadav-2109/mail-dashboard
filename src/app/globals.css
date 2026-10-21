@@ -586,3 +586,9 @@ fieldset:disabled input, fieldset:disabled select { background: var(--hover); co
 .meter span { display: block; height: 100%; background: var(--good); border-radius: inherit }
 .meter span.warn { background: var(--warn) }
 .meter span.bad { background: var(--bad) }
+.filter-bar { justify-content: flex-start; flex-wrap: wrap; gap: 8px }
+.filter-bar input { width: 200px }
+.filter-bar select { max-width: 240px }
+.bulk-actions { display: contents; border: 0; margin: 0; padding: 0 }
+.bulk-actions:disabled button { opacity: .5; cursor: not-allowed }
+.danger-text { color: var(--bad) }

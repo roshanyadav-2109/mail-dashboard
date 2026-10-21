@@ -8,6 +8,7 @@ import { atLeast } from '@/lib/roles'
 import { confirmEverywhere, narrowOptions, narrowToGroups, widenToEverywhere, type UnsubGroup } from '@/lib/unsubscribe'
 
 import PageHead from '../page-head'
+import { Selected, SelectAll } from '../select-all'
 
 export const dynamic = 'force-dynamic'
 
@@ -35,6 +36,23 @@ async function decide(fd: FormData) {
   } else if (op === 'resub_group' && groupId) {
     await db().from('group_optouts').delete().eq('email', email).eq('group_id', groupId)
     await audit(actor, 'contact.resubscribed', { type: 'contact', id: email }, { scope: 'group', group: groupId, via: 'dashboard' })
+  }
+  revalidatePath('/unsubscribed')
+}
+
+/** Same decisions for every ticked row. Each checkbox value is "email|group_id|campaign_id". */
+async function decideMany(fd: FormData) {
+  'use server'
+  await requireRole('sender')
+  const op = String(fd.get('op') ?? '')
+  for (const v of [...new Set(fd.getAll('sel').map(String))].slice(0, 2000)) {
+    const [email, groupId, campaignId] = v.split('|')
+    const one = new FormData()
+    one.set('op', op)
+    one.set('email', email)
+    if (groupId) one.set('group_id', groupId)
+    if (campaignId) one.set('campaign_id', campaignId)
+    await decide(one)
   }
   revalidatePath('/unsubscribed')
 }
@@ -181,6 +199,30 @@ export default async function Unsubscribed({ searchParams }: { searchParams: Pro
             These people are already blocked from every email. Keep it that way, or narrow it to just the group the email came from.
           </div>
         )}
+        {canEdit && rows.length > 0 && (
+          <form id="unsub-bulk" action={decideMany}>
+            <Selected total={rows.length} name="sel">
+              {view === 'review' && (
+                <button type="submit" name="op" value="keep">
+                  Keep everywhere
+                </button>
+              )}
+              {view === 'review' && (
+                <button className="ghost" type="submit" name="op" value="narrow" title="For each person, stop only the groups their email came from (where that applies)">
+                  Only leave their groups
+                </button>
+              )}
+              {view === 'groups' && (
+                <button className="danger" type="submit" name="op" value="widen">
+                  Unsubscribe everywhere
+                </button>
+              )}
+              <button className="ghost" type="submit" name="op" value={view === 'groups' ? 'resub_group' : 'resub_all'} title="Only if they asked to receive emails again">
+                Resubscribe
+              </button>
+            </Selected>
+          </form>
+        )}
         {rows.length === 0 ? (
           <div className="empty">
             {needle ? 'No matches.' : view === 'review' ? 'Nothing to review.' : view === 'all' ? 'Nobody is unsubscribed everywhere.' : 'Nobody has left a group.'}
@@ -190,6 +232,11 @@ export default async function Unsubscribed({ searchParams }: { searchParams: Pro
             <table>
               <thead>
                 <tr>
+                  {canEdit && (
+                    <th style={{ width: 32 }}>
+                      <SelectAll name="sel" form="unsub-bulk" />
+                    </th>
+                  )}
                   <th>Email</th>
                   {view === 'groups' && <th>Left group</th>}
                   <th className="hide-sm">From campaign</th>
@@ -204,6 +251,11 @@ export default async function Unsubscribed({ searchParams }: { searchParams: Pro
                     const g = r as GroupRow
                     return (
                       <tr key={`${g.email}-${g.group_id}`}>
+                        {canEdit && (
+                          <td>
+                            <input type="checkbox" name="sel" form="unsub-bulk" value={`${g.email}|${g.group_id}|${g.campaign_id ?? ''}`} aria-label={`Select ${g.email}`} />
+                          </td>
+                        )}
                         <td>{who(g.email)}</td>
                         <td>
                           <Link className="link" href={`/groups/${g.group_id}`}>
@@ -237,6 +289,11 @@ export default async function Unsubscribed({ searchParams }: { searchParams: Pro
                   const groups = options.get(s.email) ?? []
                   return (
                     <tr key={s.email}>
+                      {canEdit && (
+                        <td>
+                          <input type="checkbox" name="sel" form="unsub-bulk" value={`${s.email}||${s.campaign_id ?? ''}`} aria-label={`Select ${s.email}`} />
+                        </td>
+                      )}
                       <td>
                         {who(s.email)}
                         {view === 'review' && <span className="badge scheduled" style={{ marginLeft: 6 }}>new</span>}
