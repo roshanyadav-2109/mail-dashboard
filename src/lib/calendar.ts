@@ -11,6 +11,20 @@ export type CalendarEvent = {
   description?: string
   /** Shows as "free" so it never blocks their day: right for deadlines and reminders. */
   free?: boolean
+  /** Optional video link (Google Meet, Zoom, Teams …). Only added when given; nothing is generated. */
+  meetingUrl?: string
+}
+
+/** An https link, or null. */
+export function cleanMeetingUrl(raw: unknown): string | null {
+  const s = String(raw ?? '').trim()
+  if (!s) return null
+  try {
+    const u = new URL(/^https?:\/\//i.test(s) ? s : `https://${s}`)
+    return u.protocol === 'https:' && u.hostname.includes('.') ? u.toString().slice(0, 500) : null
+  } catch {
+    return null
+  }
 }
 
 const pad = (n: number) => String(n).padStart(2, '0')
@@ -26,7 +40,7 @@ const istDate = (iso: string, addDays = 0) => {
 
 export function googleCalendarUrl(e: CalendarEvent) {
   const dates = e.allDay ? `${istDate(e.start)}/${istDate(e.end, 1)}` : `${utcStamp(e.start)}/${utcStamp(e.end)}`
-  const p = new URLSearchParams({ action: 'TEMPLATE', text: e.title, dates, details: e.description ?? '', location: e.location ?? '' })
+  const p = new URLSearchParams({ action: 'TEMPLATE', text: e.title, dates, details: [e.description, e.meetingUrl ? `Join: ${e.meetingUrl}` : ''].filter(Boolean).join('\n\n'), location: e.location || e.meetingUrl || '' })
   return `https://calendar.google.com/calendar/render?${p}`
 }
 
@@ -63,8 +77,11 @@ export function buildIcs(e: CalendarEvent, o: { uid: string; organizer: string; 
     e.allDay ? `DTSTART;VALUE=DATE:${istDate(e.start)}` : `DTSTART:${utcStamp(e.start)}`,
     e.allDay ? `DTEND;VALUE=DATE:${istDate(e.end, 1)}` : `DTEND:${utcStamp(e.end)}`,
     `SUMMARY:${icsText(e.title)}`,
-    e.location ? `LOCATION:${icsText(e.location)}` : '',
-    e.description ? `DESCRIPTION:${icsText(e.description)}` : '',
+    e.location || e.meetingUrl ? `LOCATION:${icsText(e.location || e.meetingUrl || '')}` : '',
+    e.description || e.meetingUrl ? `DESCRIPTION:${icsText([e.description, e.meetingUrl ? `Join: ${e.meetingUrl}` : ''].filter(Boolean).join('\n\n'))}` : '',
+    e.meetingUrl ? `URL:${e.meetingUrl}` : '',
+    // Google Calendar shows its "Join with Google Meet" button for this.
+    e.meetingUrl && new URL(e.meetingUrl).hostname === 'meet.google.com' ? `X-GOOGLE-CONFERENCE:${e.meetingUrl}` : '',
     `ORGANIZER;CN=${icsText(o.organizerName ?? o.organizer)}:mailto:${o.organizer}`,
     `ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:${o.attendee}`,
     'STATUS:CONFIRMED',
@@ -92,5 +109,6 @@ export function cleanEvent(e: unknown): CalendarEvent | null {
     location: String(x.location ?? '').slice(0, 300),
     description: String(x.description ?? '').slice(0, 2000),
     free: !!x.free,
+    meetingUrl: cleanMeetingUrl(x.meetingUrl) ?? undefined,
   }
 }

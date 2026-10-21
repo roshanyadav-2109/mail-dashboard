@@ -231,6 +231,7 @@ export default function Builder({ doc, onChange }: { doc: Doc; onChange: (d: Doc
                   </div>
                   <input value={b.location} onChange={(e) => patch(b.id, { location: e.target.value })} placeholder="Location or meeting link" />
                   <textarea rows={2} value={b.details} onChange={(e) => patch(b.id, { details: e.target.value })} placeholder="Details (optional)" />
+                  <input value={b.meetingUrl ?? ''} onChange={(e) => patch(b.id, { meetingUrl: e.target.value })} placeholder="Meeting link (optional): adds a Join meeting button" />
                   <label className="check-row">
                     <input type="checkbox" checked={!!b.buttons} onChange={(e) => patch(b.id, { buttons: e.target.checked })} /> Show “Add to Google Calendar / Outlook” buttons
                   </label>

@@ -683,9 +683,17 @@ export default function Composer(props: {
                     />
                   </label>
                   <input value={event.location ?? ''} onChange={(e) => setEvent({ ...event, location: e.target.value })} placeholder="Location (optional)" aria-label="Location" />
+                  <input value={event.meetingUrl ?? ''} onChange={(e) => setEvent({ ...event, meetingUrl: e.target.value })} placeholder="Meeting link (optional), e.g. meet.google.com/abc-defg-hij" aria-label="Meeting link" />
+                  <p className="muted" style={{ margin: 0 }}>
+                    Leave empty for no meeting link.{' '}
+                    <a className="link" href="https://meet.google.com/new" target="_blank" rel="noreferrer">
+                      Create a Google Meet link ↗
+                    </a>{' '}
+                    and paste it here; Google Calendar then shows a “Join with Google Meet” button.
+                  </p>
                   <textarea rows={2} value={event.description ?? ''} onChange={(e) => setEvent({ ...event, description: e.target.value })} placeholder="Details (optional)" aria-label="Event details" />
                   <p className="muted" style={{ margin: 0 }}>
-                    Goes straight into each person’s Google / Outlook / Apple calendar when the email arrives (unless they turned that off). No Meet link is added. Yes / No / Maybe replies go to {replyTo || props.defaultReplyTo || 'the sender address'}. Send a test to yourself and check your calendar.
+                    Goes straight into each person’s Google / Outlook / Apple calendar when the email arrives (unless they turned that off). A meeting link is only included if you add one. Yes / No / Maybe replies go to {replyTo || props.defaultReplyTo || 'the sender address'}. Send a test to yourself and check your calendar.
                   </p>
                 </div>
               )}
