@@ -9,6 +9,8 @@ export type CalendarEvent = {
   allDay?: boolean
   location?: string
   description?: string
+  /** Shows as "free" so it never blocks their day: right for deadlines and reminders. */
+  free?: boolean
 }
 
 const pad = (n: number) => String(n).padStart(2, '0')
@@ -66,7 +68,7 @@ export function buildIcs(e: CalendarEvent, o: { uid: string; organizer: string; 
     `ORGANIZER;CN=${icsText(o.organizerName ?? o.organizer)}:mailto:${o.organizer}`,
     `ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:${o.attendee}`,
     'STATUS:CONFIRMED',
-    'TRANSP:OPAQUE',
+    e.free ? 'TRANSP:TRANSPARENT' : 'TRANSP:OPAQUE',
     'END:VEVENT',
     'END:VCALENDAR',
   ].filter(Boolean)
@@ -89,5 +91,6 @@ export function cleanEvent(e: unknown): CalendarEvent | null {
     allDay: !!x.allDay,
     location: String(x.location ?? '').slice(0, 300),
     description: String(x.description ?? '').slice(0, 2000),
+    free: !!x.free,
   }
 }

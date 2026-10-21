@@ -661,7 +661,10 @@ export default function Composer(props: {
                 <div className="invite-fields">
                   <input value={event.title} onChange={(e) => setEvent({ ...event, title: e.target.value })} placeholder="Event title" aria-label="Event title" />
                   <label className="check-row">
-                    <input type="checkbox" checked={!!event.allDay} onChange={(e) => setEvent({ ...event, allDay: e.target.checked })} /> All day (deadlines and tasks)
+                    <input type="checkbox" checked={!!event.allDay} onChange={(e) => setEvent({ ...event, allDay: e.target.checked, free: e.target.checked ? true : event.free })} /> All day (deadlines and tasks)
+                  </label>
+                  <label className="check-row" style={{ marginTop: 0 }}>
+                    <input type="checkbox" checked={!!event.free} onChange={(e) => setEvent({ ...event, free: e.target.checked })} /> Show as free (a reminder, doesn’t block their time)
                   </label>
                   <label className="muted">
                     Starts
@@ -679,10 +682,10 @@ export default function Composer(props: {
                       onChange={(e) => e.target.value && setEvent({ ...event, end: new Date(e.target.value).toISOString() })}
                     />
                   </label>
-                  <input value={event.location ?? ''} onChange={(e) => setEvent({ ...event, location: e.target.value })} placeholder="Location or meeting link" aria-label="Location" />
+                  <input value={event.location ?? ''} onChange={(e) => setEvent({ ...event, location: e.target.value })} placeholder="Location (optional)" aria-label="Location" />
                   <textarea rows={2} value={event.description ?? ''} onChange={(e) => setEvent({ ...event, description: e.target.value })} placeholder="Details (optional)" aria-label="Event details" />
                   <p className="muted" style={{ margin: 0 }}>
-                    Each person gets an invite they can accept in Gmail, Outlook or Apple Calendar. Replies go to {replyTo || props.defaultReplyTo || 'the sender address'}.
+                    Goes straight into each person’s Google / Outlook / Apple calendar when the email arrives (unless they turned that off). No Meet link is added. Yes / No / Maybe replies go to {replyTo || props.defaultReplyTo || 'the sender address'}. Send a test to yourself and check your calendar.
                   </p>
                 </div>
               )}

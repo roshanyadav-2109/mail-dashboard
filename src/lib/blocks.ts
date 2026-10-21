@@ -14,7 +14,7 @@ export type Block =
   | { id: string; type: 'divider' }
   | { id: string; type: 'spacer'; height: number }
   | { id: string; type: 'footer'; text: string }
-  | { id: string; type: 'event'; title: string; start: string; end: string; allDay: boolean; location: string; details: string }
+  | { id: string; type: 'event'; title: string; start: string; end: string; allDay: boolean; location: string; details: string; buttons?: boolean }
 
 export type Theme = { accent: string; background: string; card: string; text: string; font: string; width: number }
 export type Doc = { theme: Theme; blocks: Block[] }
@@ -54,7 +54,7 @@ export function newBlock(type: BlockType): Block {
     case 'event': {
       const start = new Date(Date.now() + 86_400_000)
       start.setMinutes(0, 0, 0)
-      return { id, type, title: 'Live session', start: start.toISOString(), end: new Date(start.getTime() + 3_600_000).toISOString(), allDay: false, location: 'Online', details: '' }
+      return { id, type, title: 'Live session', start: start.toISOString(), end: new Date(start.getTime() + 3_600_000).toISOString(), allDay: false, location: '', details: '', buttons: false }
     }
   }
 }
@@ -130,7 +130,7 @@ function blockHtml(b: Block, t: Theme): string {
           `<div style="font-size:17px;font-weight:700;margin-bottom:6px">📅 ${esc(b.title)}</div>` +
           `<div style="font-size:14px;line-height:1.6">${esc(when)}${b.location ? `<br>📍 ${esc(b.location)}` : ''}</div>` +
           (b.details ? `<div style="font-size:14px;line-height:1.6;margin-top:6px;color:#4b5563">${inline(b.details, t.accent)}</div>` : '') +
-          `<div style="margin-top:10px">${btn(googleCalendarUrl(ev), 'Add to Google Calendar')}${btn(outlookCalendarUrl(ev), 'Add to Outlook')}</div>` +
+          (b.buttons ? `<div style="margin-top:10px">${btn(googleCalendarUrl(ev), 'Add to Google Calendar')}${btn(outlookCalendarUrl(ev), 'Add to Outlook')}</div>` : '') +
           `</td></tr></table>`,
         '12px 32px',
       )

@@ -231,7 +231,12 @@ export default function Builder({ doc, onChange }: { doc: Doc; onChange: (d: Doc
                   </div>
                   <input value={b.location} onChange={(e) => patch(b.id, { location: e.target.value })} placeholder="Location or meeting link" />
                   <textarea rows={2} value={b.details} onChange={(e) => patch(b.id, { details: e.target.value })} placeholder="Details (optional)" />
-                  <span className="muted">Shows the date with “Add to Google Calendar” and “Add to Outlook” buttons.</span>
+                  <label className="check-row">
+                    <input type="checkbox" checked={!!b.buttons} onChange={(e) => patch(b.id, { buttons: e.target.checked })} /> Show “Add to Google Calendar / Outlook” buttons
+                  </label>
+                  <span className="muted">
+                    Off is best with a calendar invite (Options → Calendar invite): the event lands in their calendar by itself, with no Meet link. The buttons let readers create the event themselves, and Google may then add a Meet link from their own settings.
+                  </span>
                 </>
               )}
             </div>
