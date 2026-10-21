@@ -14,6 +14,7 @@ import EmailEditor from '../editor/email-editor'
 import { checkFlags, FlagDialog, type Flag } from '../flag-dialog'
 import { uploadFile } from '../editor/upload'
 import Icon from '../icons'
+import { connectMeet } from './meet-actions'
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const extract = (text: string) => [...new Set(text.split(/[\s,;]+/).map((s) => s.trim().replace(/^["'<]+|["'>]+$/g, '').toLowerCase()).filter((s) => EMAIL.test(s)))]
@@ -58,6 +59,12 @@ export default function Composer(props: {
   const [replyTo, setReplyTo] = useState(props.initialReplyTo)
   const [attachments, setAttachments] = useState<Attachment[]>(props.initialAttachments)
   const [event, setEvent] = useState<CalendarEvent | null>(props.initialEvent)
+  // Meeting link: none, a generated Google Meet, or pasted by hand.
+  const [meetMode, setMeetMode] = useState<'none' | 'auto' | 'manual'>(() => {
+    const u = props.initialEvent?.meetingUrl
+    return !u ? 'none' : u.startsWith('https://meet.google.com/') ? 'auto' : 'manual'
+  })
+  const [meetState, setMeetState] = useState<{ busy?: boolean; error?: string; connect?: boolean }>({})
   const [testTo, setTestTo] = useState(props.defaultTestTo.join(', '))
   const [preview, setPreview] = useState<Preview | null>(null)
   const [drawer, setDrawer] = useState<'recipients' | 'options' | null>(null)
@@ -239,6 +246,25 @@ export default function Composer(props: {
     })
     setNote(res.ok ? `Saved template “${name}”` : 'Could not save template')
   }
+
+  async function generateMeet() {
+    setMeetState({ busy: true })
+    const res = await fetch('/api/meet', { method: 'POST' })
+    const r = (await res.json().catch(() => ({}))) as { ok?: boolean; url?: string; reason?: string; message?: string }
+    if (r.ok && r.url) {
+      const url = r.url
+      setEvent((e) => (e ? { ...e, meetingUrl: url } : e))
+      setMeetState({})
+    } else setMeetState({ error: r.message ?? 'Could not create a Meet link.', connect: r.reason === 'not_connected' })
+  }
+  // Back from "Connect Google Meet": create the link straight away.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('meet') === '1' && event && !event.meetingUrl) {
+      setMeetMode('auto')
+      void generateMeet()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   async function sendTest() {
     setBusy(true)
@@ -683,14 +709,69 @@ export default function Composer(props: {
                     />
                   </label>
                   <input value={event.location ?? ''} onChange={(e) => setEvent({ ...event, location: e.target.value })} placeholder="Location (optional)" aria-label="Location" />
-                  <input value={event.meetingUrl ?? ''} onChange={(e) => setEvent({ ...event, meetingUrl: e.target.value })} placeholder="Meeting link (optional), e.g. meet.google.com/abc-defg-hij" aria-label="Meeting link" />
-                  <p className="muted" style={{ margin: 0 }}>
-                    Leave empty for no meeting link.{' '}
-                    <a className="link" href="https://meet.google.com/new" target="_blank" rel="noreferrer">
-                      Create a Google Meet link ↗
-                    </a>{' '}
-                    and paste it here; Google Calendar then shows a “Join with Google Meet” button.
-                  </p>
+                  <div className="seg" role="radiogroup" aria-label="Meeting link">
+                    {(
+                      [
+                        ['none', 'No link'],
+                        ['auto', 'Google Meet'],
+                        ['manual', 'Paste a link'],
+                      ] as const
+                    ).map(([m, label]) => (
+                      <button
+                        key={m}
+                        type="button"
+                        role="radio"
+                        aria-checked={meetMode === m}
+                        className={meetMode === m ? 'on' : ''}
+                        onClick={() => {
+                          setMeetMode(m)
+                          setMeetState({})
+                          setEvent({ ...event, meetingUrl: m === 'manual' ? '' : undefined })
+                          if (m === 'auto') void generateMeet()
+                        }}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  {meetMode === 'auto' && (
+                    <div className="row" style={{ gap: 8 }}>
+                      {event.meetingUrl ? (
+                        <>
+                          <a className="link" href={event.meetingUrl} target="_blank" rel="noreferrer">
+                            {event.meetingUrl.replace('https://', '')}
+                          </a>
+                          <button type="button" className="ghost" onClick={() => void generateMeet()} disabled={meetState.busy}>
+                            New link
+                          </button>
+                        </>
+                      ) : meetState.busy ? (
+                        <span className="muted">Creating a Meet link…</span>
+                      ) : meetState.connect ? (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const id = await persist()
+                            await connectMeet(id)
+                          }}
+                        >
+                          Connect Google Meet
+                        </button>
+                      ) : (
+                        <button type="button" className="ghost" onClick={() => void generateMeet()}>
+                          Generate link
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {meetMode === 'auto' && meetState.error && (
+                    <p className={meetState.connect ? 'muted' : 'bad'} style={{ margin: 0 }}>
+                      {meetState.connect ? 'One-time step: allow this dashboard to create Meet links on your Google account. You will be the host.' : meetState.error}
+                    </p>
+                  )}
+                  {meetMode === 'manual' && (
+                    <input value={event.meetingUrl ?? ''} onChange={(e) => setEvent({ ...event, meetingUrl: e.target.value })} placeholder="Zoom, Teams or Meet link" aria-label="Meeting link" />
+                  )}
                   <textarea rows={2} value={event.description ?? ''} onChange={(e) => setEvent({ ...event, description: e.target.value })} placeholder="Details (optional)" aria-label="Event details" />
                   <p className="muted" style={{ margin: 0 }}>
                     Goes straight into each person’s Google / Outlook / Apple calendar when the email arrives (unless they turned that off). A meeting link is only included if you add one. Yes / No / Maybe replies go to {replyTo || props.defaultReplyTo || 'the sender address'}. Send a test to yourself and check your calendar.
