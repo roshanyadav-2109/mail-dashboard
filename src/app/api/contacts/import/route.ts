@@ -1,5 +1,7 @@
 import { audit } from '@/lib/audit'
 import { addToGroup, upsertContacts } from '@/lib/audience'
+import { currentBrand } from '@/lib/brand'
+import { db } from '@/lib/db'
 import { apiRole } from '@/lib/guard'
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -22,8 +24,13 @@ export async function POST(req: Request) {
       tags: [...(r.tags ?? []), ...(tag ? [tag] : [])].map((t) => String(t).slice(0, 60)),
     }))
 
-  const ids = await upsertContacts(clean, 'import')
-  if (groupId) await addToGroup(groupId, [...ids.values()])
+  const brand = await currentBrand()
+  // The group must be one of this business's own.
+  const { data: group } = groupId ? await db().from('groups').select('id').eq('id', groupId).eq('brand_id', brand.id).maybeSingle() : { data: null }
+  if (groupId && !group) return Response.json({ error: 'group not found' }, { status: 404 })
+
+  const ids = await upsertContacts(clean, 'import', brand.id)
+  if (group) await addToGroup(group.id, [...ids.values()])
   await audit(me.email, 'contacts.imported', groupId ? { type: 'group', id: groupId } : { type: 'contacts' }, { count: ids.size, tag: tag ?? null })
   return Response.json({ imported: ids.size, invalid: rows.length - clean.length })
 }

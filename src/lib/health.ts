@@ -22,9 +22,9 @@ const ORDER: Level[] = ['good', 'warning', 'serious', 'critical']
 
 export const LEVEL_LABEL: Record<Level, string> = { good: 'Healthy', warning: 'Watch', serious: 'At risk', critical: 'Critical' }
 
-/** Bounce and complaint rates over the last N days, rated against the SES thresholds. */
-export async function senderHealth(days = 30): Promise<Health> {
-  const { data } = await db().rpc('daily_stats', { days })
+/** Bounce and complaint rates over the last N days, rated against the SES thresholds. One brand, or all when omitted. */
+export async function senderHealth(days = 30, brandId?: string): Promise<Health> {
+  const { data } = await db().rpc('daily_stats', { days, brand: brandId ?? null })
   const rows = (data ?? []) as { sent: number; bounced: number; complained: number }[]
   const sent = rows.reduce((a, r) => a + Number(r.sent), 0)
   const bounced = rows.reduce((a, r) => a + Number(r.bounced), 0)

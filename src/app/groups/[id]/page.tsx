@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 
 import { audit } from '@/lib/audit'
 import { addToGroup, fetchAll, upsertContacts } from '@/lib/audience'
+import { blockingScopes, currentBrand } from '@/lib/brand'
 import { db } from '@/lib/db'
 import { parseEmails } from '@/lib/emails'
 import { applyFlagChoice } from '@/lib/flags'
@@ -18,6 +19,13 @@ export const dynamic = 'force-dynamic'
 type Group = { id: string; name: string; description: string; created_at: string; is_topic: boolean; topic_description: string }
 type Member = { contact_id: string; contacts: { id: string; email: string; name: string } | null }
 
+/** The current business, if this group is one of its own (actions re-check: a form could be replayed after switching). */
+async function ownBrand(id: string) {
+  const b = await currentBrand()
+  const { data } = await db().from('groups').select('id').eq('id', id).eq('brand_id', b.id).maybeSingle()
+  return data ? b : null
+}
+
 export default async function GroupDetail({
   params,
   searchParams,
@@ -30,8 +38,11 @@ export default async function GroupDetail({
   const { id } = await params
   const { q, error } = await searchParams
   const sb = db()
+  const brand = await currentBrand()
   const { data } = await sb.from('groups').select('*').eq('id', id).maybeSingle()
   if (!data) notFound()
+  // A group of another business: back to this business's list.
+  if (data.brand_id !== brand.id) redirect('/groups')
   const group = data as Group
 
   const members = (
@@ -47,7 +58,7 @@ export default async function GroupDetail({
   const blocked = new Map<string, string>()
   const emails = members.map((m) => m.email)
   for (let i = 0; i < emails.length; i += 200) {
-    const { data: rows } = await sb.from('suppressions').select('email, reason').in('email', emails.slice(i, i + 200))
+    const { data: rows } = await sb.from('suppressions').select('email, reason').in('scope', blockingScopes(brand.id)).in('email', emails.slice(i, i + 200))
     rows?.forEach((r: { email: string; reason: string }) => blocked.set(r.email, r.reason))
   }
 
@@ -108,6 +119,7 @@ export default async function GroupDetail({
                         action={async () => {
                           'use server'
                           const actor = await requireRole('sender')
+                          if (!(await ownBrand(id))) return
                           await db().from('group_members').delete().eq('group_id', id).eq('contact_id', m.id)
                           await audit(actor.email, 'group.member_removed', { type: 'group', id }, { email: m.email })
                           revalidatePath(`/groups/${id}`)
@@ -137,8 +149,14 @@ export default async function GroupDetail({
           const actor = await requireRole('sender')
           const file = form.get('file')
           const fromFile = file instanceof File && file.size > 0 ? await file.text() : ''
-          const added = await applyFlagChoice(parseEmails(`${form.get('emails') ?? ''} ${fromFile}`), form.get('flag_choice'), id)
-          const ids = await upsertContacts(added.map((email) => ({ email })))
+          const b = await ownBrand(id)
+          if (!b) return
+          const added = await applyFlagChoice(parseEmails(`${form.get('emails') ?? ''} ${fromFile}`), form.get('flag_choice'), b.id, id)
+          const ids = await upsertContacts(
+            added.map((email) => ({ email })),
+            'manual',
+            b.id,
+          )
           await addToGroup(id, [...ids.values()])
           await audit(actor.email, 'group.members_added', { type: 'group', id }, { count: ids.size })
           revalidatePath(`/groups/${id}`)
@@ -159,7 +177,9 @@ export default async function GroupDetail({
           const actor = await requireRole('sender')
           const name = String(form.get('name') ?? '').trim()
           if (!name) return
-          const { data: clash } = await db().from('groups').select('id').eq('name', name).neq('id', id).maybeSingle()
+          const b = await ownBrand(id)
+          if (!b) return
+          const { data: clash } = await db().from('groups').select('id').eq('brand_id', b.id).eq('name', name).neq('id', id).maybeSingle()
           if (clash) redirect(`/groups/${id}?error=exists`)
           const description = String(form.get('description') ?? '').trim()
           await db()
@@ -172,6 +192,7 @@ export default async function GroupDetail({
               updated_at: new Date().toISOString(),
             })
             .eq('id', id)
+            .eq('brand_id', b.id)
           await audit(actor.email, 'group.updated', { type: 'group', id }, { name })
           revalidatePath(`/groups/${id}`)
         }}
@@ -196,7 +217,8 @@ export default async function GroupDetail({
         action={async () => {
           'use server'
           const actor = await requireRole('sender')
-          await db().from('groups').delete().eq('id', id)
+          const b = await currentBrand()
+          await db().from('groups').delete().eq('id', id).eq('brand_id', b.id)
           await audit(actor.email, 'group.deleted', { type: 'group', id }, { name: group.name })
           redirect('/groups')
         }}

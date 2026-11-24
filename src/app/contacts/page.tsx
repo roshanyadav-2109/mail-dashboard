@@ -3,6 +3,7 @@ import { revalidatePath } from 'next/cache'
 
 import { audit } from '@/lib/audit'
 import { fetchAll, upsertContacts } from '@/lib/audience'
+import { currentBrand } from '@/lib/brand'
 import { db } from '@/lib/db'
 import { cleanTextRule, showPattern } from '@/lib/domains'
 import { applyFlagChoice } from '@/lib/flags'
@@ -27,8 +28,9 @@ export default async function Contacts({ searchParams }: { searchParams: Promise
   const kind = rawKind === 'number' || rawKind === 'other' ? rawKind : undefined
   const p = Math.max(0, Number(page ?? 0) || 0)
   const sb = db()
+  const brand = await currentBrand()
 
-  let query = sb.from('contacts').select('id, email, name, tags, source, created_at', { count: 'exact' }).order('created_at', { ascending: false })
+  let query = sb.from('contacts').select('id, email, name, tags, source, created_at', { count: 'exact' }).eq('brand_id', brand.id).order('created_at', { ascending: false })
   const needle = q?.trim().replace(/[%,()]/g, '')
   if (needle) query = query.or(`email.ilike.%${needle}%,name.ilike.%${needle}%`)
   if (tag) query = query.contains('tags', [tag])
@@ -40,14 +42,14 @@ export default async function Contacts({ searchParams }: { searchParams: Promise
   const total = count ?? 0
 
   // Tag cloud for filtering.
-  const tagRows = await fetchAll<{ tags: string[] }>((from, to) => sb.from('contacts').select('tags').neq('tags', '{}').range(from, to))
+  const tagRows = await fetchAll<{ tags: string[] }>((from, to) => sb.from('contacts').select('tags').eq('brand_id', brand.id).neq('tags', '{}').range(from, to))
   const tagCounts = new Map<string, number>()
   tagRows.forEach((r) => r.tags.forEach((t) => tagCounts.set(t, (tagCounts.get(t) ?? 0) + 1)))
   const tags = [...tagCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 30)
 
-  const { count: otherCount } = await sb.from('contacts').select('id', { count: 'exact', head: true }).not('email', 'match', '^[0-9]')
+  const { count: otherCount } = await sb.from('contacts').select('id', { count: 'exact', head: true }).eq('brand_id', brand.id).not('email', 'match', '^[0-9]')
 
-  const { data: groups } = await sb.from('groups').select('id, name').order('name')
+  const { data: groups } = await sb.from('groups').select('id, name').eq('brand_id', brand.id).order('name')
   const qs = (patch: Record<string, string | undefined>) => {
     const params = new URLSearchParams()
     const merged = { q, tag, kind, page: undefined, ...patch }
@@ -58,9 +60,9 @@ export default async function Contacts({ searchParams }: { searchParams: Promise
 
   // Bulk actions work on email addresses containing the search text (names are ignored, to be precise).
   const bulkTerm = needle && needle.length >= 2 ? needle.toLowerCase() : null
-  const bulkCount = bulkTerm && canEdit ? ((await sb.from('contacts').select('id', { count: 'exact', head: true }).ilike('email', `%${bulkTerm}%`)).count ?? 0) : 0
+  const bulkCount = bulkTerm && canEdit ? ((await sb.from('contacts').select('id', { count: 'exact', head: true }).eq('brand_id', brand.id).ilike('email', `%${bulkTerm}%`)).count ?? 0) : 0
   const bulkRule = bulkTerm ? cleanTextRule('contains', bulkTerm) : null
-  const { data: ruleRow } = bulkRule ? await sb.from('excluded_domains').select('pattern').eq('pattern', bulkRule).maybeSingle() : { data: null }
+  const { data: ruleRow } = bulkRule ? await sb.from('excluded_domains').select('pattern').eq('brand_id', brand.id).eq('pattern', bulkRule).maybeSingle() : { data: null }
 
   const table = (
     <div className="card">
@@ -88,7 +90,10 @@ export default async function Contacts({ searchParams }: { searchParams: Promise
                 action={async () => {
                   'use server'
                   const actor = await requireRole('sender')
-                  await db().from('excluded_domains').upsert({ pattern: bulkRule, note: 'added from Contacts search', added_by: actor.email }, { onConflict: 'pattern', ignoreDuplicates: true })
+                  const b = await currentBrand()
+                  await db()
+                    .from('excluded_domains')
+                    .upsert({ brand_id: b.id, pattern: bulkRule, note: 'added from Contacts search', added_by: actor.email }, { onConflict: 'brand_id,pattern', ignoreDuplicates: true })
                   await audit(actor.email, 'domain.excluded', { type: 'domain' }, { patterns: [bulkRule], via: 'contacts search' })
                   revalidatePath('/contacts')
                 }}
@@ -106,7 +111,8 @@ export default async function Contacts({ searchParams }: { searchParams: Promise
                 const actor = await requireRole('sender')
                 const groupId = String(fd.get('group') ?? '')
                 if (!groupId) return
-                const ids = await fetchAll<{ id: string }>((from, to) => db().from('contacts').select('id').ilike('email', `%${bulkTerm}%`).range(from, to))
+                const b = await currentBrand()
+                const ids = await fetchAll<{ id: string }>((from, to) => db().from('contacts').select('id').eq('brand_id', b.id).ilike('email', `%${bulkTerm}%`).range(from, to))
                 for (let i = 0; i < ids.length; i += 200)
                   await db()
                     .from('group_members')
@@ -141,8 +147,9 @@ export default async function Contacts({ searchParams }: { searchParams: Promise
                 'use server'
                 const actor = await requireRole('sender')
                 if (fd.get('confirm') !== 'on') return
-                const victims = await fetchAll<{ email: string }>((from, to) => db().from('contacts').select('email').ilike('email', `%${bulkTerm}%`).range(from, to))
-                await db().from('contacts').delete().ilike('email', `%${bulkTerm}%`)
+                const b = await currentBrand()
+                const victims = await fetchAll<{ email: string }>((from, to) => db().from('contacts').select('email').eq('brand_id', b.id).ilike('email', `%${bulkTerm}%`).range(from, to))
+                await db().from('contacts').delete().eq('brand_id', b.id).ilike('email', `%${bulkTerm}%`)
                 await audit(actor.email, 'contacts.bulk_deleted', { type: 'contacts' }, { matching: bulkTerm, count: victims.length, sample: victims.slice(0, 20).map((v) => v.email) })
                 revalidatePath('/contacts')
                 const { redirect } = await import('next/navigation')
@@ -249,12 +256,13 @@ export default async function Contacts({ searchParams }: { searchParams: Promise
           const actor = await requireRole('sender')
           const email = String(form.get('email') ?? '').trim().toLowerCase()
           if (!EMAIL.test(email)) return
-          if (!(await applyFlagChoice([email], form.get('flag_choice'))).length) return
+          const b = await currentBrand()
+          if (!(await applyFlagChoice([email], form.get('flag_choice'), b.id)).length) return
           const tagsIn = String(form.get('tags') ?? '')
             .split(',')
             .map((t) => t.trim())
             .filter(Boolean)
-          await upsertContacts([{ email, name: String(form.get('name') ?? ''), tags: tagsIn }])
+          await upsertContacts([{ email, name: String(form.get('name') ?? ''), tags: tagsIn }], 'manual', b.id)
           await audit(actor.email, 'contact.added', { type: 'contact', id: email })
           revalidatePath('/contacts')
         }}

@@ -1,4 +1,5 @@
 import { resolveAudience, type Audience } from '@/lib/audience'
+import { currentBrand } from '@/lib/brand'
 import { db } from '@/lib/db'
 import { domainOf } from '@/lib/domains'
 import { apiRole } from '@/lib/guard'
@@ -9,13 +10,14 @@ import { getSettings } from '@/lib/settings'
 export async function POST(req: Request) {
   if (!(await apiRole('sender'))) return Response.json({ error: 'forbidden' }, { status: 403 })
   const { audience } = (await req.json()) as { audience: Audience }
+  const brand = await currentBrand()
   const [resolved, settings, today] = await Promise.all([
-    resolveAudience(audience ?? { groups: [], segments: [], emails: [] }),
+    resolveAudience(audience ?? { groups: [], segments: [], emails: [] }, brand.id),
     getSettings(),
     sentToday(),
   ])
   const first = resolved.emails[0]
-  const { data: sample } = first ? await db().from('contacts').select('email, name, fields').eq('email', first).maybeSingle() : { data: null }
+  const { data: sample } = first ? await db().from('contacts').select('email, name, fields').eq('brand_id', brand.id).eq('email', first).maybeSingle() : { data: null }
   return Response.json({
     sample: sample ?? (first ? { email: first } : null),
     count: resolved.emails.length,

@@ -2,9 +2,9 @@ import { createHash, randomBytes } from 'crypto'
 
 import { audit } from '@/lib/audit'
 import { addToGroup, upsertContacts } from '@/lib/audience'
+import { getBrand } from '@/lib/brand'
 import { db } from '@/lib/db'
 import { sendEmail } from '@/lib/ses'
-import { getSettings } from '@/lib/settings'
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -18,6 +18,7 @@ export type SignupForm = {
   double_opt_in: boolean
   success_message: string
   active: boolean
+  brand_id: string
 }
 
 /** Counts hits per key in a time window. Returns false once the limit is exceeded. */
@@ -72,16 +73,16 @@ export async function subscribe(form: SignupForm, raw: { email: string; name: st
 
   const token = randomBytes(24).toString('base64url')
   await db().from('pending_subscriptions').insert({ token, form_id: form.id, email, name })
-  const settings = await getSettings()
+  const brand = await getBrand(form.brand_id)
   const link = `${(process.env.APP_URL ?? '').replace(/\/$/, '')}/subscribe/confirm/${token}`
   const safeTitle = form.title.replace(/</g, '&lt;')
   await sendEmail({
+    brand,
     to: email,
     subject: `Please confirm: ${form.title}`,
     format: 'html',
-    html: `<div style="font-family:Arial,sans-serif;max-width:520px;margin:auto;padding:24px;color:#1f2328"><h2 style="margin:0 0 12px">Confirm your subscription</h2><p style="line-height:1.6">Click below to confirm you want to receive emails from ${settings.sender_name.replace(/</g, '&lt;')} (${safeTitle}).</p><p><a href="${link}" style="display:inline-block;background:#f6821f;color:#fff;padding:12px 22px;border-radius:6px;text-decoration:none;font-weight:bold">Confirm subscription</a></p><p style="color:#6b7280;font-size:13px">If you didn’t ask for this, just ignore this email.</p></div>`,
+    html: `<div style="font-family:Arial,sans-serif;max-width:520px;margin:auto;padding:24px;color:#1f2328"><h2 style="margin:0 0 12px">Confirm your subscription</h2><p style="line-height:1.6">Click below to confirm you want to receive emails from ${brand.name.replace(/</g, '&lt;')} (${safeTitle}).</p><p><a href="${link}" style="display:inline-block;background:#f6821f;color:#fff;padding:12px 22px;border-radius:6px;text-decoration:none;font-weight:bold">Confirm subscription</a></p><p style="color:#6b7280;font-size:13px">If you didn’t ask for this, just ignore this email.</p></div>`,
     text: `Confirm your subscription to ${form.title}: ${link}\n\nIf you didn't ask for this, ignore this email.`,
-    fromName: settings.sender_name,
   })
   return { ok: true, code: 'pending', pending: true, message: MESSAGES.pending }
 }
@@ -93,14 +94,14 @@ export async function subscribe(form: SignupForm, raw: { email: string; name: st
  */
 async function addSubscriber(form: SignupForm, email: string, name: string, confirmed: boolean) {
   const sb = db()
-  const ids = await upsertContacts([{ email, name }], `form:${form.slug}`)
+  const ids = await upsertContacts([{ email, name }], `form:${form.slug}`, form.brand_id)
   if (form.group_id) {
     await addToGroup(form.group_id, [...ids.values()])
     // Joining again cancels an earlier "leave this group".
     if (confirmed) await sb.from('group_optouts').delete().eq('group_id', form.group_id).eq('email', email)
   }
   // A confirmed re-subscribe lifts an earlier unsubscribe, but never a bounce or complaint.
-  if (confirmed) await sb.from('suppressions').delete().eq('email', email).eq('reason', 'unsubscribe')
+  if (confirmed) await sb.from('suppressions').delete().eq('email', email).eq('reason', 'unsubscribe').eq('scope', form.brand_id)
   await audit(email, 'contact.subscribed', { type: 'form', id: form.id }, { form: form.slug })
 }
 

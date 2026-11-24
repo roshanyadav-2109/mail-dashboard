@@ -1,4 +1,5 @@
 import { resolveAudience, type Audience } from '@/lib/audience'
+import { currentBrand } from '@/lib/brand'
 import { bestTimes, hourLabel, MIN_DAYS, MIN_SAMPLES } from '@/lib/besttime'
 import { apiRole } from '@/lib/guard'
 
@@ -6,7 +7,7 @@ import { apiRole } from '@/lib/guard'
 export async function POST(req: Request) {
   if (!(await apiRole('sender'))) return Response.json({ error: 'forbidden' }, { status: 403 })
   const { audience } = (await req.json()) as { audience: Audience }
-  const { emails } = await resolveAudience(audience)
+  const { emails } = await resolveAudience(audience, (await currentBrand()).id)
   const best = await bestTimes(emails)
   const hours = new Map<number, number>()
   for (const b of best.values()) hours.set(b.hour, (hours.get(b.hour) ?? 0) + 1)

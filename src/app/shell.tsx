@@ -1,4 +1,5 @@
 import { signOut } from '@/auth'
+import type { Brand } from '@/lib/brand'
 import type { Role } from '@/lib/roles'
 
 import Icon from './icons'
@@ -7,15 +8,17 @@ import Palette from './palette'
 import Sidebar from './sidebar'
 
 /** The signed-in frame: sidebar (a drawer on phones), top bar, content area, phone tab bar and quick search. */
-export default function Shell({ email, role, children }: { email: string; role: Role; children: React.ReactNode }) {
+type BrandLite = Pick<Brand, 'id' | 'name' | 'domain'>
+
+export default function Shell({ email, role, brand, brands, children }: { email: string; role: Role; brand: BrandLite; brands: BrandLite[]; children: React.ReactNode }) {
   return (
     <div className="shell">
-      <Sidebar email={email} role={role} />
+      <Sidebar email={email} role={role} brand={brand} brands={brands} />
       <NavBackdrop />
       <div className="main">
         <header className="topbar">
           <NavToggle />
-          <span className="topbar-title">Mail Dashboard</span>
+          <span className="topbar-title">{brand.name}</span>
           <span style={{ flex: 1 }} />
           <a className="top-link" href="https://github.com/roshanyadav-2109/mail-dashboard#readme" target="_blank" rel="noreferrer">
             <Icon name="help" size={17} />

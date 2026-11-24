@@ -3,6 +3,7 @@ import Link from 'next/link'
 
 import { audit } from '@/lib/audit'
 import { fetchAll, upsertContacts } from '@/lib/audience'
+import { blockingScopes, currentBrand } from '@/lib/brand'
 import { db } from '@/lib/db'
 import { requireRole } from '@/lib/guard'
 import { atLeast } from '@/lib/roles'
@@ -18,11 +19,11 @@ type Row = { email: string; reason: string; detail: string | null; created_at: s
 const REASONS: Record<string, string> = { bounce: 'Bounced', complaint: 'Marked as spam', unsubscribe: 'Unsubscribed', manual: 'Blocked manually' }
 
 /** Ticked addresses, or every address matching the current filter when "all matching" is chosen. */
-async function chosen(fd: FormData): Promise<string[]> {
+async function chosen(fd: FormData, brandId: string): Promise<string[]> {
   if (fd.get('scope') === 'all') {
     const reason = String(fd.get('reason') ?? '')
     const q = String(fd.get('q') ?? '').trim()
-    return (await fetchAll<{ email: string }>((from, to) => filtered(reason, q, 'email').order('email').range(from, to))).map((r) => r.email)
+    return (await fetchAll<{ email: string }>((from, to) => filtered(brandId, reason, q, 'email').order('email').range(from, to))).map((r) => r.email)
   }
   return [...new Set(fd.getAll('email').map(String))].slice(0, 5000)
 }
@@ -35,8 +36,9 @@ function backTo(fd: FormData, msg: string) {
   return `/suppressions?${p}`
 }
 
-function filtered(reason: string, q: string, columns = '*', count?: 'exact') {
-  let query = db().from('suppressions').select(columns, count ? { count } : undefined)
+/** This business's blocks: shared ones (bounces, spam complaints) plus its own unsubscribes and manual blocks. */
+function filtered(brandId: string, reason: string, q: string, columns = '*', count?: 'exact') {
+  let query = db().from('suppressions').select(columns, count ? { count } : undefined).in('scope', blockingScopes(brandId))
   if (reason in REASONS) query = query.eq('reason', reason)
   if (q) query = query.ilike('email', `%${q.replace(/[%,()*\\]/g, '')}%`)
   return query
@@ -47,17 +49,18 @@ export default async function Suppressions({ searchParams }: { searchParams: Pro
   const canEdit = atLeast(me.role, 'sender')
   const { q = '', reason = '', done } = await searchParams
   const sb = db()
-  const { data, count } = await filtered(reason, q.trim(), '*', 'exact').order('created_at', { ascending: false }).limit(1000)
+  const brand = await currentBrand()
+  const { data, count } = await filtered(brand.id, reason, q.trim(), '*', 'exact').order('created_at', { ascending: false }).limit(1000)
   const rows = (data ?? []) as unknown as Row[]
   const matching = count ?? rows.length
 
   // Which of the listed addresses are still in Contacts.
   const inContacts = new Set<string>()
   for (let i = 0; i < rows.length; i += 200) {
-    const { data: c } = await sb.from('contacts').select('email').in('email', rows.slice(i, i + 200).map((r) => r.email))
+    const { data: c } = await sb.from('contacts').select('email').eq('brand_id', brand.id).in('email', rows.slice(i, i + 200).map((r) => r.email))
     c?.forEach((x: { email: string }) => inContacts.add(x.email))
   }
-  const reasonCounts = await Promise.all(Object.keys(REASONS).map(async (r) => [r, (await sb.from('suppressions').select('email', { count: 'exact', head: true }).eq('reason', r)).count ?? 0] as const))
+  const reasonCounts = await Promise.all(Object.keys(REASONS).map(async (r) => [r, (await sb.from('suppressions').select('email', { count: 'exact', head: true }).in('scope', blockingScopes(brand.id)).eq('reason', r)).count ?? 0] as const))
   const qs = (patch: Record<string, string>) => {
     const p = new URLSearchParams({ ...(q ? { q } : {}), ...(reason ? { reason } : {}), ...patch })
     for (const [k, v] of [...p.entries()]) if (!v) p.delete(k)
@@ -92,7 +95,8 @@ export default async function Suppressions({ searchParams }: { searchParams: Pro
                     .split(/[\s,;]+/)
                     .map((e) => e.trim().toLowerCase())
                     .filter((e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e))
-                  for (const e of emails) await suppress(e, 'manual', `blocked by ${actor.email}`)
+                  const b = await currentBrand()
+                  for (const e of emails) await suppress(e, 'manual', `blocked by ${actor.email}`, null, b.id)
                   if (emails.length) await audit(actor.email, 'suppression.added', { type: 'suppression' }, { emails: emails.slice(0, 50), count: emails.length })
                   revalidatePath('/suppressions')
                 }}
@@ -128,12 +132,14 @@ export default async function Suppressions({ searchParams }: { searchParams: Pro
                 <button
                   className="ghost"
                   type="submit"
-                  title="Remove the block so these addresses can be emailed again"
+                  title="Remove the block so these addresses can be emailed again. Unblocking a bounce or spam complaint lifts it for every business."
                   formAction={async (fd) => {
                     'use server'
                     const actor = await requireRole('sender')
-                    const emails = await chosen(fd)
-                    for (let i = 0; i < emails.length; i += 200) await db().from('suppressions').delete().in('email', emails.slice(i, i + 200))
+                    const b = await currentBrand()
+                    const emails = await chosen(fd, b.id)
+                    for (let i = 0; i < emails.length; i += 200)
+                      await db().from('suppressions').delete().in('scope', blockingScopes(b.id)).in('email', emails.slice(i, i + 200))
                     await audit(actor.email, 'suppression.removed', { type: 'suppression' }, { count: emails.length, sample: emails.slice(0, 20) })
                     const { redirect } = await import('next/navigation')
                     redirect(backTo(fd, `Unblocked ${emails.length}: they can be emailed again`))
@@ -148,8 +154,13 @@ export default async function Suppressions({ searchParams }: { searchParams: Pro
                   formAction={async (fd) => {
                     'use server'
                     const actor = await requireRole('sender')
-                    const emails = await chosen(fd)
-                    const ids = await upsertContacts(emails.map((email) => ({ email })), 'suppressions')
+                    const b = await currentBrand()
+                    const emails = await chosen(fd, b.id)
+                    const ids = await upsertContacts(
+                      emails.map((email) => ({ email })),
+                      'suppressions',
+                      b.id,
+                    )
                     await audit(actor.email, 'contacts.readded', { type: 'contacts' }, { count: ids.size, sample: emails.slice(0, 20) })
                     const { redirect } = await import('next/navigation')
                     redirect(backTo(fd, `${ids.size} added back to Contacts`))
@@ -164,8 +175,9 @@ export default async function Suppressions({ searchParams }: { searchParams: Pro
                   formAction={async (fd) => {
                     'use server'
                     const actor = await requireRole('sender')
-                    const emails = await chosen(fd)
-                    for (let i = 0; i < emails.length; i += 200) await db().from('contacts').delete().in('email', emails.slice(i, i + 200))
+                    const b = await currentBrand()
+                    const emails = await chosen(fd, b.id)
+                    for (let i = 0; i < emails.length; i += 200) await db().from('contacts').delete().eq('brand_id', b.id).in('email', emails.slice(i, i + 200))
                     await audit(actor.email, 'contacts.bulk_deleted', { type: 'contacts' }, { matching: 'selected on Suppressions', count: emails.length, sample: emails.slice(0, 20) })
                     const { redirect } = await import('next/navigation')
                     redirect(backTo(fd, `Removed ${emails.length} from Contacts (still blocked)`))

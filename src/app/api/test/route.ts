@@ -1,4 +1,5 @@
 import { audit } from '@/lib/audit'
+import { currentBrand } from '@/lib/brand'
 import { buildIcs, cleanEvent } from '@/lib/calendar'
 import { db } from '@/lib/db'
 import { cleanDraft } from '@/lib/draft'
@@ -6,7 +7,6 @@ import { apiRole } from '@/lib/guard'
 import { render, type MergeData } from '@/lib/render'
 import { loadAttachments, type StoredAttachment } from '@/lib/sender'
 import { sendEmail, senderAddress } from '@/lib/ses'
-import { getSettings } from '@/lib/settings'
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -34,26 +34,26 @@ export async function POST(req: Request) {
   const { error } = cleanDraft({ reply_to: b.reply_to, attachments: b.attachments })
   if (error) return Response.json({ error }, { status: 400 })
 
-  const settings = await getSettings()
+  const brand = await currentBrand()
   const event = cleanEvent(b.event)
-  const { data: people } = await db().from('contacts').select('email, name, fields').in('email', to)
+  const { data: people } = await db().from('contacts').select('email, name, fields').eq('brand_id', brand.id).in('email', to)
   const byEmail = new Map(((people ?? []) as MergeData[]).map((p) => [p.email, p]))
   try {
     const attachments = await loadAttachments(b.attachments ?? [])
     for (const email of to) {
       const person = byEmail.get(email) ?? { email }
       await sendEmail({
+        brand,
         to: email,
         subject: `[Test] ${render(b.subject, person)}`,
         preheader: render(b.preheader ?? '', person),
         format: b.format === 'text' ? 'text' : 'html',
         html: render(b.html ?? '', person, true),
         text: render(b.text ?? '', person),
-        replyTo: b.reply_to || settings.reply_to || null,
-        fromName: settings.sender_name,
+        replyTo: b.reply_to || brand.reply_to || null,
         attachments,
         icalEvent: event
-          ? buildIcs(event, { uid: `test-${Date.now()}@unknowniitians.in`, organizer: senderAddress(), organizerName: settings.sender_name, attendee: email })
+          ? buildIcs(event, { uid: `test-${Date.now()}@${brand.domain}`, organizer: senderAddress(brand), organizerName: brand.sender_name, attendee: email })
           : undefined,
       })
     }

@@ -1,4 +1,5 @@
 import { resolveAudience, type Audience } from '@/lib/audience'
+import { currentBrand } from '@/lib/brand'
 import { apiRole } from '@/lib/guard'
 import { riskCheck } from '@/lib/risk'
 
@@ -6,6 +7,6 @@ import { riskCheck } from '@/lib/risk'
 export async function POST(req: Request) {
   if (!(await apiRole('sender'))) return Response.json({ error: 'forbidden' }, { status: 403 })
   const { audience } = (await req.json()) as { audience: Audience }
-  const { emails } = await resolveAudience(audience)
+  const { emails } = await resolveAudience(audience, (await currentBrand()).id)
   return Response.json({ total: emails.length, ...(await riskCheck(emails)) })
 }

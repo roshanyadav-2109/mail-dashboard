@@ -1,5 +1,6 @@
 import Link from 'next/link'
 
+import { currentBrand } from '@/lib/brand'
 import { db } from '@/lib/db'
 import { requireRole } from '@/lib/guard'
 import { LEVEL_LABEL, senderHealth, type Level } from '@/lib/health'
@@ -35,12 +36,13 @@ export default async function Analytics({ searchParams }: { searchParams: Promis
   const { days: d } = await searchParams
   const days = RANGES.includes(Number(d)) ? Number(d) : 30
   const sb = db()
+  const brand = await currentBrand()
 
   const since = new Date(Date.now() - days * 86_400_000)
   const [{ data: daily }, health, { data: camps }] = await Promise.all([
-    sb.rpc('daily_stats', { days }),
-    senderHealth(30),
-    sb.from('campaign_stats').select('*').gte('created_at', since.toISOString()).in('status', ['sent', 'sending']).order('created_at', { ascending: false }).limit(50),
+    sb.rpc('daily_stats', { days, brand: brand.id }),
+    senderHealth(30, brand.id),
+    sb.from('campaign_stats').select('*').eq('brand_id', brand.id).gte('created_at', since.toISOString()).in('status', ['sent', 'sending']).order('created_at', { ascending: false }).limit(50),
   ])
 
   // Fill missing days with zeros so the time axis is continuous.

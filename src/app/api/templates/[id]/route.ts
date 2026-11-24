@@ -1,4 +1,5 @@
 import { audit } from '@/lib/audit'
+import { currentBrand } from '@/lib/brand'
 import { db } from '@/lib/db'
 import { apiRole } from '@/lib/guard'
 import { cleanTemplate } from '@/lib/templates'
@@ -14,6 +15,7 @@ export async function PATCH(req: Request, { params }: Ctx) {
     .from('templates')
     .update({ ...cleanTemplate(await req.json()), updated_at: new Date().toISOString() })
     .eq('id', id)
+    .eq('brand_id', (await currentBrand()).id)
     .eq('is_starter', false)
     .select('id, updated_at')
   if (!data?.length) return Response.json({ error: 'Starter templates can’t be changed — duplicate it first' }, { status: 409 })
@@ -25,7 +27,7 @@ export async function DELETE(_req: Request, { params }: Ctx) {
   const me = await apiRole('sender')
   if (!me) return Response.json({ error: 'forbidden' }, { status: 403 })
   const { id } = await params
-  const { data } = await db().from('templates').delete().eq('id', id).eq('is_starter', false).select('name')
+  const { data } = await db().from('templates').delete().eq('id', id).eq('brand_id', (await currentBrand()).id).eq('is_starter', false).select('name')
   if (!data?.length) return Response.json({ error: 'Starter templates can’t be deleted' }, { status: 409 })
   await audit(me.email, 'template.deleted', { type: 'template', id }, { name: data[0].name })
   return Response.json({ ok: true })

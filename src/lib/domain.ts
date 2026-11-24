@@ -2,6 +2,7 @@ import { promises as dnsPromises } from 'dns'
 
 import { GetEmailIdentityCommand, SESv2Client } from '@aws-sdk/client-sesv2'
 
+import { DEFAULT_BRAND, brandAddress, type Brand } from '@/lib/brand'
 import { getSettings } from '@/lib/settings'
 
 // Live DNS + SES checks for the sending domain, each with the exact record to add when something is wrong.
@@ -15,16 +16,17 @@ const txt = (host: string) => resolver.resolveTxt(host).then((r) => r.map((parts
 const cname = (host: string) => resolver.resolveCname(host).catch(() => [] as string[])
 const mx = (host: string) => resolver.resolveMx(host).catch(() => [] as { exchange: string; priority: number }[])
 
-export async function domainHealth(): Promise<{ domain: string; region: string; checks: Check[] }> {
-  const from = process.env.SES_FROM ?? ''
-  const address = (from.match(/<([^>]+)>/)?.[1] ?? from).trim()
-  const domain = address.split('@')[1] ?? 'unknowniitians.in'
+/** Checks one brand's sending domain. */
+export async function domainHealth(brand: Brand): Promise<{ domain: string; region: string; checks: Check[] }> {
+  const address = brandAddress(brand)
+  const domain = brand.domain
   const region = process.env.AWS_REGION ?? 'ap-southeast-2'
   const settings = await getSettings()
   const checks: Check[] = []
 
   // SES's own view of the domain (needs ses:GetEmailIdentity on the sending key).
-  let tokens: string[] = settings.dkim_tokens
+  // Saved tokens are a fallback for the original domain only.
+  let tokens: string[] = brand.id === DEFAULT_BRAND ? settings.dkim_tokens : []
   let mailFrom: string | null = null
   let mailFromStatus: string | null = null
   try {
@@ -55,7 +57,7 @@ export async function domainHealth(): Promise<{ domain: string; region: string; 
 
   // DMARC policy.
   const dmarc = (await txt(`_dmarc.${domain}`)).find((r) => r.toUpperCase().startsWith('V=DMARC1'))
-  const reportTo = settings.reply_to || 'desk@unknowniitians.com'
+  const reportTo = brand.reply_to || 'desk@unknowniitians.com'
   checks.push({
     name: 'DMARC policy',
     status: dmarc ? (/p=none/i.test(dmarc) ? 'warn' : 'ok') : 'fail',
@@ -102,13 +104,13 @@ export async function domainHealth(): Promise<{ domain: string; region: string; 
   })
 
   // Replies: the reply-to mailbox must accept mail.
-  const replyDomain = (settings.reply_to || address).split('@')[1]
+  const replyDomain = (brand.reply_to || address).split('@')[1]
   const replyMx = await mx(replyDomain)
   checks.push({
     name: 'Replies mailbox',
     status: replyMx.length ? 'ok' : 'fail',
     detail: replyMx.length
-      ? `Replies go to ${settings.reply_to || address} (${replyDomain} receives mail via ${replyMx[0].exchange}).`
+      ? `Replies go to ${brand.reply_to || address} (${replyDomain} receives mail via ${replyMx[0].exchange}).`
       : `${replyDomain} can’t receive email, so replies are lost. Set a working reply-to in Settings.`,
   })
 

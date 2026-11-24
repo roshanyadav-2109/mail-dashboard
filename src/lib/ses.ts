@@ -1,6 +1,7 @@
 import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2'
 import MailComposer from 'nodemailer/lib/mail-composer'
 
+import { brandAddress, type Brand } from '@/lib/brand'
 import { toText, withPreheader, type Format } from '@/lib/content'
 import { makeToken } from '@/lib/unsub'
 
@@ -10,26 +11,22 @@ const client = new SESv2Client({ region: process.env.AWS_REGION })
 
 const appUrl = () => (process.env.APP_URL ?? '').replace(/\/$/, '')
 
-// Mail must only ever go out from this domain, never from a Gmail or any other address.
-const SENDER_DOMAIN = 'unknowniitians.in'
+// Mail only ever goes out from a brand's own verified domain (SENDING_DOMAINS), never from Gmail or anything else.
 
-/** The verified sender address from SES_FROM; refuses anything outside unknowniitians.in. */
-export function senderAddress(): string {
-  const from = process.env.SES_FROM ?? ''
-  const address = (from.match(/<([^>]+)>/)?.[1] ?? from).trim()
-  if (address.toLowerCase().split('@')[1] !== SENDER_DOMAIN) throw new Error(`SES_FROM must be an @${SENDER_DOMAIN} address (got "${from || 'empty'}")`)
-  return address
-}
+/** The verified sender address of a brand, e.g. mail@unknowniitians.in. */
+export const senderAddress = (brand: Brand) => brandAddress(brand)
 
-const fromHeader = (name?: string) => {
-  const address = senderAddress()
-  const clean = (name ?? '').replace(/["<>\r\n]/g, '').trim()
+const fromHeader = (brand: Brand, name?: string) => {
+  const address = senderAddress(brand)
+  const clean = (name || brand.sender_name).replace(/["<>\r\n]/g, '').trim()
   return clean ? `"${clean}" <${address}>` : address
 }
 
 export type Attachment = { filename: string; content: Buffer; contentType: string }
 
 export type Outgoing = {
+  /** Which business sends it: sets the From address, default name and reply-to, and the unsubscribe scope. */
+  brand: Brand
   to: string
   subject: string
   format: Format
@@ -51,7 +48,8 @@ export type Outgoing = {
  * reply-to and attachments. Plain-text emails are sent text-only.
  */
 export async function sendEmail(o: Outgoing): Promise<string | undefined> {
-  const token = makeToken(o.to, o.campaignId)
+  const token = makeToken(o.to, o.campaignId, o.brand.id)
+  const replyTo = o.replyTo || o.brand.reply_to || undefined
   const pageUrl = `${appUrl()}/unsubscribe/${token}`
   const oneClickUrl = `${appUrl()}/api/unsubscribe/${token}`
   const prefsUrl = `${appUrl()}/preferences/${token}`
@@ -74,9 +72,9 @@ export async function sendEmail(o: Outgoing): Promise<string | undefined> {
   if (o.attachments?.length || o.icalEvent) {
     // SES "simple" messages can't carry files, so build the full MIME message.
     const mime = new MailComposer({
-      from: fromHeader(o.fromName),
+      from: fromHeader(o.brand, o.fromName),
       to: o.to,
-      replyTo: o.replyTo || undefined,
+      replyTo,
       subject: o.subject,
       text,
       html: isText ? undefined : html,
@@ -92,9 +90,9 @@ export async function sendEmail(o: Outgoing): Promise<string | undefined> {
   const res = await client.send(
     new SendEmailCommand({
       ...common,
-      FromEmailAddress: fromHeader(o.fromName),
+      FromEmailAddress: fromHeader(o.brand, o.fromName),
       Destination: { ToAddresses: [o.to] },
-      ReplyToAddresses: o.replyTo ? [o.replyTo] : undefined,
+      ReplyToAddresses: replyTo ? [replyTo] : undefined,
       Content: {
         Simple: {
           Subject: { Data: o.subject, Charset: 'UTF-8' },

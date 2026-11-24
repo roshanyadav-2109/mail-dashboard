@@ -1,3 +1,4 @@
+import { blockingScopes } from '@/lib/brand'
 import { db } from '@/lib/db'
 import { matchesDomain } from '@/lib/domains'
 import { checkQuality } from '@/lib/quality'
@@ -22,13 +23,13 @@ export const FLAG_LABEL: Record<FlagReason, string> = {
  * Addresses that need a second look before being added: on the do-not-email list, left the given group,
  * or low quality (typo, throwaway inbox, dead domain).
  */
-export async function flagged(emails: string[], groupId?: string | null): Promise<Flag[]> {
+export async function flagged(emails: string[], brandId: string, groupId?: string | null): Promise<Flag[]> {
   const list = [...new Set(emails.map((e) => e.trim().toLowerCase()).filter(Boolean))]
   const out = new Map<string, Flag>()
   const sb = db()
   for (let i = 0; i < list.length; i += 200) {
     const part = list.slice(i, i + 200)
-    const { data } = await sb.from('suppressions').select('email, reason, created_at').in('email', part)
+    const { data } = await sb.from('suppressions').select('email, reason, created_at').in('scope', blockingScopes(brandId)).in('email', part)
     for (const r of (data ?? []) as { email: string; reason: FlagReason; created_at: string }[])
       out.set(r.email, { email: r.email, reason: r.reason, label: FLAG_LABEL[r.reason] ?? r.reason, since: r.created_at })
     if (groupId) {
@@ -37,7 +38,7 @@ export async function flagged(emails: string[], groupId?: string | null): Promis
         if (!out.has(r.email)) out.set(r.email, { email: r.email, reason: 'left_group', label: FLAG_LABEL.left_group, since: r.created_at })
     }
   }
-  const excluded = await getExcludedDomains()
+  const excluded = await getExcludedDomains(brandId)
   if (excluded.length)
     for (const e of list) if (!out.has(e) && matchesDomain(e, excluded)) out.set(e, { email: e, reason: 'excluded_domain', label: FLAG_LABEL.excluded_domain })
   for (const q of await checkQuality(list.filter((e) => !out.has(e))))
@@ -49,9 +50,9 @@ export async function flagged(emails: string[], groupId?: string | null): Promis
  * Server-side half of the warning, applied to what the user chose:
  * "skip" drops every flagged address, "fix" corrects typos and drops the rest, "add" keeps everything.
  */
-export async function applyFlagChoice(emails: string[], choice: FormDataEntryValue | null, groupId?: string | null): Promise<string[]> {
+export async function applyFlagChoice(emails: string[], choice: FormDataEntryValue | null, brandId: string, groupId?: string | null): Promise<string[]> {
   if (choice !== 'skip' && choice !== 'fix') return emails
-  const flags = new Map((await flagged(emails, groupId)).map((f) => [f.email, f]))
+  const flags = new Map((await flagged(emails, brandId, groupId)).map((f) => [f.email, f]))
   const out: string[] = []
   for (const e of emails) {
     const f = flags.get(e.trim().toLowerCase())

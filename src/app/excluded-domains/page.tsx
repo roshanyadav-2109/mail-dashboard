@@ -2,6 +2,7 @@ import { revalidatePath } from 'next/cache'
 
 import { audit } from '@/lib/audit'
 import { fetchAll } from '@/lib/audience'
+import { currentBrand } from '@/lib/brand'
 import { db } from '@/lib/db'
 import { domainOf, isTextRule, matchesDomain, parsePatterns, parseTextRules, showPattern } from '@/lib/domains'
 import { requireRole } from '@/lib/guard'
@@ -19,11 +20,12 @@ export default async function ExcludedDomains({ searchParams }: { searchParams: 
   const canEdit = atLeast(me.role, 'sender')
   const { added, skipped } = await searchParams
   const sb = db()
-  const { data } = await sb.from('excluded_domains').select('*').order('created_at', { ascending: false })
+  const brand = await currentBrand()
+  const { data } = await sb.from('excluded_domains').select('*').eq('brand_id', brand.id).order('created_at', { ascending: false })
   const rows = (data ?? []) as Row[]
 
   // How many contacts each rule leaves out, so the effect is visible before anyone sends.
-  const contacts = rows.length ? await fetchAll<{ email: string }>((from, to) => sb.from('contacts').select('email').range(from, to)) : []
+  const contacts = rows.length ? await fetchAll<{ email: string }>((from, to) => sb.from('contacts').select('email').eq('brand_id', brand.id).range(from, to)) : []
   const affected = new Map(rows.map((r) => [r.pattern, contacts.filter((c) => matchesDomain(c.email, [r.pattern]))]))
   const total = new Set([...affected.values()].flat().map((c) => c.email)).size
 
@@ -49,7 +51,7 @@ export default async function ExcludedDomains({ searchParams }: { searchParams: 
             const actor = await requireRole('sender')
             const patterns = [...new Set(fd.getAll('pattern').map(String))].slice(0, 500)
             if (!patterns.length) return
-            await db().from('excluded_domains').delete().in('pattern', patterns)
+            await db().from('excluded_domains').delete().eq('brand_id', (await currentBrand()).id).in('pattern', patterns)
             await audit(actor.email, 'domain.unexcluded', { type: 'domain' }, { patterns })
             revalidatePath('/excluded-domains')
           }}
@@ -123,7 +125,7 @@ export default async function ExcludedDomains({ searchParams }: { searchParams: 
                           action={async () => {
                             'use server'
                             const actor = await requireRole('sender')
-                            await db().from('excluded_domains').delete().eq('pattern', r.pattern)
+                            await db().from('excluded_domains').delete().eq('brand_id', (await currentBrand()).id).eq('pattern', r.pattern)
                             await audit(actor.email, 'domain.unexcluded', { type: 'domain', id: r.pattern })
                             revalidatePath('/excluded-domains')
                           }}
@@ -157,10 +159,11 @@ export default async function ExcludedDomains({ searchParams }: { searchParams: 
           if (!patterns.length) return
           const note = String(fd.get('note') ?? '').trim().slice(0, 200)
           const sb2 = db()
-          const { data: existing } = await sb2.from('excluded_domains').select('pattern').in('pattern', patterns)
+          const b = await currentBrand()
+          const { data: existing } = await sb2.from('excluded_domains').select('pattern').eq('brand_id', b.id).in('pattern', patterns)
           const have = new Set((existing ?? []).map((r: { pattern: string }) => r.pattern))
           const fresh = patterns.filter((p) => !have.has(p))
-          if (fresh.length) await sb2.from('excluded_domains').insert(fresh.map((pattern) => ({ pattern, note, added_by: actor.email })))
+          if (fresh.length) await sb2.from('excluded_domains').insert(fresh.map((pattern) => ({ brand_id: b.id, pattern, note, added_by: actor.email })))
           await audit(actor.email, 'domain.excluded', { type: 'domain' }, { patterns: fresh, note })
           revalidatePath('/excluded-domains')
           const { redirect } = await import('next/navigation')

@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 
 import { audit } from '@/lib/audit'
 import { addToGroup, upsertContacts } from '@/lib/audience'
+import { currentBrand } from '@/lib/brand'
 import { db } from '@/lib/db'
 import { parseEmails } from '@/lib/emails'
 import { applyFlagChoice } from '@/lib/flags'
@@ -20,7 +21,8 @@ export default async function Groups({ searchParams }: { searchParams: Promise<{
   const me = await requireRole('viewer')
   const canEdit = atLeast(me.role, 'sender')
   const { error } = await searchParams
-  const { data } = await db().from('groups').select('id, name, description, created_at, group_members(count)').order('name')
+  const brand = await currentBrand()
+  const { data } = await db().from('groups').select('id, name, description, created_at, group_members(count)').eq('brand_id', brand.id).order('name')
   const groups = (data ?? []) as Group[]
 
   const table = (
@@ -74,18 +76,23 @@ export default async function Groups({ searchParams }: { searchParams: Promise<{
         const name = String(form.get('name') ?? '').trim()
         const file = form.get('file')
         const fromFile = file instanceof File && file.size > 0 ? await file.text() : ''
-        const emails = await applyFlagChoice(parseEmails(`${form.get('emails') ?? ''} ${fromFile}`), form.get('flag_choice'))
+        const b = await currentBrand()
+        const emails = await applyFlagChoice(parseEmails(`${form.get('emails') ?? ''} ${fromFile}`), form.get('flag_choice'), b.id)
         if (!name) redirect('/groups?error=name')
         const sb = db()
-        const { data: existing } = await sb.from('groups').select('id').eq('name', name).maybeSingle()
+        const { data: existing } = await sb.from('groups').select('id').eq('brand_id', b.id).eq('name', name).maybeSingle()
         if (existing) redirect('/groups?error=exists')
         const { data: created } = await sb
           .from('groups')
-          .insert({ name, description: String(form.get('description') ?? '').trim() })
+          .insert({ name, description: String(form.get('description') ?? '').trim(), brand_id: b.id })
           .select('id')
           .single()
         if (!created) redirect('/groups')
-        const ids = await upsertContacts(emails.map((email) => ({ email })))
+        const ids = await upsertContacts(
+          emails.map((email) => ({ email })),
+          'manual',
+          b.id,
+        )
         await addToGroup(created.id, [...ids.values()])
         await audit(actor.email, 'group.created', { type: 'group', id: created.id }, { name, members: ids.size })
         redirect(`/groups/${created.id}`)

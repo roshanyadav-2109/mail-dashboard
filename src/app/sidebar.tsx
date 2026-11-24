@@ -1,18 +1,22 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
-import { useEffect } from 'react'
+import { usePathname, useRouter } from 'next/navigation'
+import { useEffect, useState } from 'react'
 
+import type { Brand } from '@/lib/brand'
 import { atLeast, type Role } from '@/lib/roles'
 
+import { switchBrand } from './brand-actions'
 import Icon from './icons'
 import { NAV } from './nav'
 
 const KEY = 'mail-side-collapsed'
 
-export default function Sidebar({ email, role }: { email: string; role: Role }) {
+export default function Sidebar({ email, role, brand, brands }: { email: string; role: Role; brand: Pick<Brand, 'id' | 'name' | 'domain'>; brands: Pick<Brand, 'id' | 'name' | 'domain'>[] }) {
   const path = usePathname()
+  const router = useRouter()
+  const [busy, setBusy] = useState(false)
   const active = (href: string) => (href === '/' ? path === '/' : path === href || path.startsWith(`${href}/`))
 
   useEffect(() => {
@@ -36,17 +40,45 @@ export default function Sidebar({ email, role }: { email: string; role: Role }) 
 
   return (
     <aside className="sidebar">
-      <div className="account">
-        <span className="brand-mark">
-          <Icon name="mail" size={16} />
-        </span>
-        <span className="account-name" title={email}>
-          {email}
-        </span>
-        <span className="account-chev">
-          <Icon name="updown" size={16} />
-        </span>
-      </div>
+      <details className="account brand-switch">
+        <summary title={`${brand.name} · ${email}`}>
+          <span className="brand-mark">{brand.name.slice(0, 1).toUpperCase()}</span>
+          <span className="account-name">
+            {brand.name}
+            <span className="account-sub">{brand.domain}</span>
+          </span>
+          <span className="account-chev">
+            <Icon name="updown" size={16} />
+          </span>
+        </summary>
+        <div className="menu brand-menu">
+          <div className="menu-head muted">Switch business</div>
+          {brands.map((b) => (
+            <button
+              key={b.id}
+              type="button"
+              className={`menu-item${b.id === brand.id ? ' on' : ''}`}
+              disabled={busy}
+              onClick={async () => {
+                if (b.id === brand.id) return
+                setBusy(true)
+                await switchBrand(b.id)
+                // Records like /campaigns/<id> belong to one brand; go to the section's list instead.
+                const section = path.split('/')[1]
+                router.push(section ? `/${section}` : '/')
+                router.refresh()
+                setBusy(false)
+              }}
+            >
+              <span className="brand-mark small">{b.name.slice(0, 1).toUpperCase()}</span>
+              <span>
+                {b.name}
+                <span className="account-sub">{b.domain}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      </details>
 
       <div className="side-search">
         <button type="button" className="search-btn" onClick={() => window.dispatchEvent(new Event('open-palette'))} title="Quick search">

@@ -1,4 +1,5 @@
 import { audit } from '@/lib/audit'
+import { currentBrand } from '@/lib/brand'
 import { readFilter, recipientsQuery } from '@/lib/campaign-filter'
 import { toCsv } from '@/lib/csv'
 import { db } from '@/lib/db'
@@ -12,7 +13,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const me = await apiRole('viewer')
   if (!me) return new Response('forbidden', { status: 403 })
   const { id } = await params
-  const { data: campaign } = await db().from('campaigns').select('subject').eq('id', id).maybeSingle()
+  const { data: campaign } = await db().from('campaigns').select('subject').eq('id', id).eq('brand_id', (await currentBrand()).id).maybeSingle()
   if (!campaign) return new Response('not found', { status: 404 })
   const filter = readFilter(Object.fromEntries(new URL(req.url).searchParams))
   const rows: Row[] = []

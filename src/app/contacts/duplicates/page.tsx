@@ -3,6 +3,7 @@ import { revalidatePath } from 'next/cache'
 
 import { audit } from '@/lib/audit'
 import { fetchAll, normalizeEmail, type Contact } from '@/lib/audience'
+import { currentBrand } from '@/lib/brand'
 import { db } from '@/lib/db'
 import { requireRole } from '@/lib/guard'
 
@@ -12,7 +13,10 @@ export const dynamic = 'force-dynamic'
 
 export default async function Duplicates() {
   await requireRole('sender')
-  const contacts = await fetchAll<Contact>((from, to) => db().from('contacts').select('id, email, name, fields, tags, source, created_at').order('created_at').range(from, to))
+  const brand = await currentBrand()
+  const contacts = await fetchAll<Contact>((from, to) =>
+    db().from('contacts').select('id, email, name, fields, tags, source, created_at').eq('brand_id', brand.id).order('created_at').range(from, to),
+  )
 
   const clusters = new Map<string, Contact[]>()
   for (const c of contacts) {
@@ -56,13 +60,14 @@ export default async function Duplicates() {
                         action={async () => {
                           'use server'
                           const actor = await requireRole('sender')
+                          const b = await currentBrand()
                           const sb = db()
                           const [keep, ...rest] = list
                           // Merge names, tags, fields and group memberships into the oldest contact.
                           const name = keep.name || rest.find((r) => r.name)?.name || ''
                           const tags = [...new Set(list.flatMap((r) => r.tags))]
                           const fields = Object.assign({}, ...rest.map((r) => r.fields).reverse(), keep.fields)
-                          await sb.from('contacts').update({ name, tags, fields, updated_at: new Date().toISOString() }).eq('id', keep.id)
+                          await sb.from('contacts').update({ name, tags, fields, updated_at: new Date().toISOString() }).eq('id', keep.id).eq('brand_id', b.id)
                           const { data: memberships } = await sb
                             .from('group_members')
                             .select('group_id')
@@ -81,6 +86,7 @@ export default async function Duplicates() {
                           await sb
                             .from('contacts')
                             .delete()
+                            .eq('brand_id', b.id)
                             .in(
                               'id',
                               rest.map((r) => r.id),

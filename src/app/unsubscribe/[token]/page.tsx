@@ -1,7 +1,9 @@
 import { redirect } from 'next/navigation'
 
 import { audit } from '@/lib/audit'
+import { getBrand } from '@/lib/brand'
 import { db } from '@/lib/db'
+import { campaignBrand } from '@/lib/suppress'
 import { readToken } from '@/lib/unsub'
 import { applyUnsubscribe } from '@/lib/unsubscribe'
 
@@ -13,11 +15,18 @@ export default async function Unsubscribe({ params, searchParams }: { params: Pr
   const { token } = await params
   const { done } = await searchParams
   const data = readToken(token)
+  // Unsubscribing stops only the business that sent the email.
+  const brand = data ? await getBrand(data.brandId ?? (await campaignBrand(data.campaignId))) : null
 
   return (
     <div className="center">
       <div className="card login" style={{ textAlign: 'left' }}>
-        <h1 style={{ marginBottom: 12 }}>Unsubscribe</h1>
+        <h1 style={{ marginBottom: brand ? 4 : 12 }}>Unsubscribe</h1>
+        {brand && (
+          <p className="muted" style={{ marginTop: 0 }}>
+            {brand.name}
+          </p>
+        )}
         {!data ? (
           <p className="bad">This link is not valid.</p>
         ) : done === 'undone' ? (
@@ -34,7 +43,8 @@ export default async function Unsubscribe({ params, searchParams }: { params: Pr
                 const d = readToken(token)
                 if (!d) return
                 const email = d.email.toLowerCase()
-                await db().from('suppressions').delete().eq('email', email).eq('reason', 'unsubscribe')
+                const scope = d.brandId ?? (await campaignBrand(d.campaignId))
+                await db().from('suppressions').delete().eq('email', email).eq('reason', 'unsubscribe').eq('scope', scope)
                 await audit(email, 'contact.resubscribed', { type: 'contact', id: email }, { via: 'undo on unsubscribe page' })
                 redirect(`/unsubscribe/${token}?done=undone`)
               }}

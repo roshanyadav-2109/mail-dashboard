@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import { audit } from '@/lib/audit'
 import { db } from '@/lib/db'
 import { requireRole } from '@/lib/guard'
+import { currentBrand } from '@/lib/brand'
 
 import PanelLayout from '../panel-layout'
 
@@ -18,17 +19,25 @@ const slugify = (s: string) =>
     .replace(/^-|-$/g, '')
     .slice(0, 48) || 'form'
 
+/** A group id from the form, if it belongs to this business. */
+async function ownGroup(id: string, brandId: string): Promise<string | null> {
+  if (!id) return null
+  const { data } = await db().from('groups').select('id').eq('id', id).eq('brand_id', brandId).maybeSingle()
+  return data?.id ?? null
+}
+
 export default async function Forms({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
   await requireRole('sender')
   const { error } = await searchParams
   const sb = db()
+  const brand = await currentBrand()
   const [{ data }, { data: groups }] = await Promise.all([
-    sb.from('signup_forms').select('id, slug, name, double_opt_in, active, group_id, groups(name)').order('created_at', { ascending: false }),
-    sb.from('groups').select('id, name').order('name'),
+    sb.from('signup_forms').select('id, slug, name, double_opt_in, active, group_id, groups(name)').eq('brand_id', brand.id).order('created_at', { ascending: false }),
+    sb.from('groups').select('id, name').eq('brand_id', brand.id).order('name'),
   ])
   const forms = (data ?? []) as unknown as Form[]
   // Signups per form, from the contact source tag.
-  const counts = await Promise.all(forms.map(async (f) => (await sb.from('contacts').select('id', { count: 'exact', head: true }).eq('source', `form:${f.slug}`)).count ?? 0))
+  const counts = await Promise.all(forms.map(async (f) => (await sb.from('contacts').select('id', { count: 'exact', head: true }).eq('brand_id', brand.id).eq('source', `form:${f.slug}`)).count ?? 0))
 
   const table = (
     <div className="card">
@@ -77,6 +86,8 @@ export default async function Forms({ searchParams }: { searchParams: Promise<{ 
         const actor = await requireRole('sender')
         const name = String(fd.get('name') ?? '').trim()
         if (!name) redirect('/forms?error=name')
+        const b = await currentBrand()
+        // Slugs are public URLs (/subscribe/<slug>), so they stay unique across every business.
         let slug = slugify(String(fd.get('slug') ?? '') || name)
         const { data: clash } = await db().from('signup_forms').select('id').eq('slug', slug).maybeSingle()
         if (clash) slug = `${slug}-${Math.random().toString(36).slice(2, 6)}`
@@ -86,9 +97,10 @@ export default async function Forms({ searchParams }: { searchParams: Promise<{ 
             name,
             slug,
             title: String(fd.get('title') ?? '').trim() || name,
-            group_id: String(fd.get('group') ?? '') || null,
+            group_id: await ownGroup(String(fd.get('group') ?? ''), b.id),
             double_opt_in: fd.get('double_opt_in') === 'on',
             created_by: actor.email,
+            brand_id: b.id,
           })
           .select('id')
           .single()

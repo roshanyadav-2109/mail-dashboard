@@ -592,3 +592,15 @@ fieldset:disabled input, fieldset:disabled select { background: var(--hover); co
 .bulk-actions { display: contents; border: 0; margin: 0; padding: 0 }
 .bulk-actions:disabled button { opacity: .5; cursor: not-allowed }
 .danger-text { color: var(--bad) }
+
+/* Sidebar business switcher */
+.brand-switch { position: relative; display: block; padding: 0 }
+.brand-switch > summary { list-style: none; display: flex; align-items: center; gap: 10px; height: 68px; padding: 0 16px; cursor: pointer }
+.brand-switch > summary::-webkit-details-marker { display: none }
+.brand-switch .brand-mark { font-weight: 700; font-size: 14px }
+.brand-mark.small { width: 24px; height: 24px; border-radius: 6px; font-size: 12px; font-weight: 700 }
+.account-sub { display: block; font-size: 12px; font-weight: 400; color: var(--muted); overflow: hidden; text-overflow: ellipsis }
+.brand-menu { position: absolute; left: 10px; right: 10px; top: 62px; z-index: 30 }
+.brand-menu .menu-item { display: flex; align-items: center; gap: 10px; text-align: left; width: 100% }
+.brand-menu .menu-item.on { background: var(--accent-soft) }
+body.side-collapsed .brand-switch > summary { padding: 0 19px }

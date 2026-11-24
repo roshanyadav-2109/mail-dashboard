@@ -1,4 +1,6 @@
 import { apiRole } from '@/lib/guard'
+
+import { notFound, ownedCampaign } from '../../owned'
 import { processBatch } from '@/lib/sender'
 
 export const maxDuration = 60
@@ -8,5 +10,6 @@ export const maxDuration = 60
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   if (!(await apiRole('sender'))) return Response.json({ error: 'forbidden' }, { status: 403 })
   const { id } = await params
+  if (!(await ownedCampaign(id))) return notFound()
   return Response.json(await processBatch(id, { size: 20, deadline: Date.now() + 45_000 }))
 }

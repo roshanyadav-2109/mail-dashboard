@@ -1,10 +1,13 @@
 import { revalidatePath } from 'next/cache'
 
+import { audit } from '@/lib/audit'
+import { currentBrand } from '@/lib/brand'
 import { db } from '@/lib/db'
 import { parseEmails } from '@/lib/emails'
 import { requireRole } from '@/lib/guard'
 import { atLeast } from '@/lib/roles'
 import { reportRecipients, sendWeeklyReport } from '@/lib/report'
+import { senderAddress } from '@/lib/ses'
 import { getSettings, saveSettings } from '@/lib/settings'
 
 import PageHead from '../page-head'
@@ -28,7 +31,8 @@ export default async function Settings({ searchParams }: { searchParams: Promise
   const recipients = await reportRecipients()
   const { data: last } = await db().from('ses_events').select('created_at, event_type').order('created_at', { ascending: false }).limit(1)
   const lastEvent = last?.[0] as { created_at: string; event_type: string } | undefined
-  const address = (process.env.SES_FROM ?? '').match(/<([^>]+)>/)?.[1] ?? process.env.SES_FROM ?? ''
+  const brand = await currentBrand()
+  const address = senderAddress(brand)
 
   return (
     <>
@@ -56,13 +60,12 @@ export default async function Settings({ searchParams }: { searchParams: Promise
         action={async (form) => {
           'use server'
           const actor = await requireRole('admin')
+          const b = await currentBrand()
           const replyTo = String(form.get('reply_to') ?? '').trim().toLowerCase()
           const daily = Math.max(1, Math.min(50000, Number(form.get('daily_limit')) || 1))
           const threshold = Math.max(1, Number(form.get('approval_threshold')) || 1)
           await saveSettings(
             {
-              sender_name: String(form.get('sender_name') ?? '').trim().slice(0, 80) || 'Unknown IITians',
-              reply_to: EMAIL.test(replyTo) ? replyTo : '',
               daily_limit: daily,
               approval_enabled: form.get('approval_enabled') === 'on',
               approval_threshold: threshold,
@@ -75,30 +78,36 @@ export default async function Settings({ searchParams }: { searchParams: Promise
             },
             actor.email,
           )
-          revalidatePath('/settings')
+          // Sender name and reply-to belong to the business picked in the sidebar.
+          const brandPatch = { sender_name: String(form.get('sender_name') ?? '').trim().slice(0, 80) || b.name, reply_to: EMAIL.test(replyTo) ? replyTo : null }
+          await db().from('brands').update(brandPatch).eq('id', b.id)
+          await audit(actor.email, 'brand.updated', { type: 'brand', id: b.id }, brandPatch)
+          revalidatePath('/', 'layout')
           const { redirect } = await import('next/navigation')
           redirect('/settings?saved=1')
         }}
       >
         <div className="card-head">
-          <h2>Sending</h2>
+          <h2>
+            Sending <span className="muted">· name and reply-to for {brand.name}</span>
+          </h2>
           {canEdit && <button type="submit">Save changes</button>}
         </div>
         <fieldset disabled={!canEdit} className="card-body settings-grid">
           <label>
             Sender name
-            <input name="sender_name" defaultValue={s.sender_name} />
+            <input name="sender_name" defaultValue={brand.sender_name} />
           </label>
           <label>
             Sender address
-            <input value={address} readOnly aria-readonly title="Fixed to unknowniitians.in" />
+            <input value={address} readOnly aria-readonly title={`Fixed to ${brand.domain}`} />
           </label>
           <label>
             Default reply-to
-            <input name="reply_to" type="email" defaultValue={s.reply_to} placeholder="Replies go to the sender address" />
+            <input name="reply_to" type="email" defaultValue={brand.reply_to ?? ''} placeholder="Replies go to the sender address" />
           </label>
           <label>
-            Daily send limit
+            Daily send limit <span className="muted">(shared by all businesses)</span>
             <input name="daily_limit" type="number" min={1} max={50000} defaultValue={s.daily_limit} />
           </label>
           <label className="check">

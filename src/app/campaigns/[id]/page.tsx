@@ -4,6 +4,7 @@ import { notFound, redirect } from 'next/navigation'
 
 import { audit } from '@/lib/audit'
 import { addToGroup, fetchAll, upsertContacts } from '@/lib/audience'
+import { currentBrand, getBrand } from '@/lib/brand'
 import { ENGAGEMENT, filterParams, filteredEmails, isFiltered, linkLabel, readFilter, recipientsQuery, SORTS, STATUSES } from '@/lib/campaign-filter'
 import type { CampaignRow } from '@/lib/campaigns'
 import { db } from '@/lib/db'
@@ -13,6 +14,7 @@ import { atLeast, isOwner } from '@/lib/roles'
 import { sentToday } from '@/lib/sender'
 import { getSettings } from '@/lib/settings'
 
+import { switchBrand } from '../../brand-actions'
 import PageHead from '../../page-head'
 import CampaignActions from './actions'
 
@@ -51,7 +53,11 @@ export default async function Campaign({ params, searchParams }: { params: Promi
   const { data } = await sb.from('campaigns').select('*').eq('id', id).maybeSingle()
   const campaign = data as CampaignRow | null
   if (!campaign) notFound()
-  if (campaign.status === 'draft' && atLeast(me.role, 'sender')) redirect(`/compose?draft=${id}`)
+  // Alert emails link here whatever business is picked, so a campaign of the other one is shown (read-only) with a switch.
+  const brand = await currentBrand()
+  const owner = campaign.brand_id === brand.id ? brand : await getBrand(campaign.brand_id)
+  const otherBrand = owner.id !== brand.id
+  if (campaign.status === 'draft' && atLeast(me.role, 'sender') && !otherBrand) redirect(`/compose?draft=${id}`)
 
   // Counters over every message (paged: the API returns at most 1000 rows per request).
   const all = await fetchAll<{ status: string; opens: number; clicks: number; machine_opens: number; machine_clicks: number }>((from, to) =>
@@ -119,9 +125,9 @@ export default async function Campaign({ params, searchParams }: { params: Promi
     linkRows.set(personal ? label : l.link, row)
   }
 
-  const canSend = atLeast(me.role, 'sender')
-  const { data: groupList } = canSend ? await sb.from('groups').select('id, name').order('name') : { data: [] }
-  const canApprove = atLeast(me.role, 'admin') && (campaign.approval?.requested_by !== me.email || isOwner(me.email))
+  const canSend = atLeast(me.role, 'sender') && !otherBrand
+  const { data: groupList } = canSend ? await sb.from('groups').select('id, name').eq('brand_id', owner.id).order('name') : { data: [] }
+  const canApprove = atLeast(me.role, 'admin') && !otherBrand && (campaign.approval?.requested_by !== me.email || isOwner(me.email))
   const body =
     campaign.format === 'text'
       ? `<pre style="white-space:pre-wrap;font:14px/1.6 Arial;margin:16px">${esc(render(campaign.text || campaign.html, SAMPLE))}</pre>`
@@ -138,6 +144,24 @@ export default async function Campaign({ params, searchParams }: { params: Promi
         }
       />
 
+      {otherBrand && (
+        <form
+          className="notice"
+          style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}
+          action={async () => {
+            'use server'
+            await switchBrand(owner.id)
+            redirect(`/campaigns/${id}`)
+          }}
+        >
+          <span>
+            This campaign belongs to <b>{owner.name}</b>. Switch to it to manage the campaign.
+          </span>
+          <button className="ghost" type="submit">
+            Switch to {owner.name}
+          </button>
+        </form>
+      )}
       <div className={`status-bar s-${campaign.status}`}>
         <span className={`badge ${campaign.status}`}>{LABEL[campaign.status] ?? campaign.status}</span>
         <span>
@@ -304,10 +328,11 @@ export default async function Campaign({ params, searchParams }: { params: Promi
                   const emails = await filteredEmails(id, filter)
                   if (!emails.length) return
                   const sb2 = db()
-                  const { data: existing } = await sb2.from('groups').select('id').eq('name', name).maybeSingle()
-                  const groupId = existing?.id ?? (await sb2.from('groups').insert({ name, description: 'Saved from a campaign filter' }).select('id').single()).data?.id
+                  // Groups and contacts belong to the campaign's business.
+                  const { data: existing } = await sb2.from('groups').select('id').eq('brand_id', owner.id).eq('name', name).maybeSingle()
+                  const groupId = existing?.id ?? (await sb2.from('groups').insert({ name, description: 'Saved from a campaign filter', brand_id: owner.id }).select('id').single()).data?.id
                   if (!groupId) return
-                  const ids = await upsertContacts(emails.map((email) => ({ email })), `campaign:${id}`)
+                  const ids = await upsertContacts(emails.map((email) => ({ email })), `campaign:${id}`, owner.id)
                   await addToGroup(groupId, [...ids.values()])
                   await audit(actor.email, 'group.members_added', { type: 'group', id: groupId }, { from_campaign: id, filter, count: emails.length })
                   revalidatePath(`/campaigns/${id}`)

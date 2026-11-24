@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 
 import { audit } from '@/lib/audit'
 import { allContacts, segmentContacts, type Rules } from '@/lib/audience'
+import { currentBrand } from '@/lib/brand'
 import { db } from '@/lib/db'
 import { requireRole } from '@/lib/guard'
 import { atLeast } from '@/lib/roles'
@@ -19,10 +20,11 @@ export default async function Segments({ searchParams }: { searchParams: Promise
   const me = await requireRole('viewer')
   const canEdit = atLeast(me.role, 'sender')
   const { error } = await searchParams
-  const { data } = await db().from('segments').select('*').order('name')
+  const brand = await currentBrand()
+  const { data } = await db().from('segments').select('*').eq('brand_id', brand.id).order('name')
   const segments = (data ?? []) as Segment[]
-  const pool = segments.length ? await allContacts() : []
-  const counts = await Promise.all(segments.map(async (s) => (await segmentContacts(s.rules, pool)).length))
+  const pool = segments.length ? await allContacts(brand.id) : []
+  const counts = await Promise.all(segments.map(async (s) => (await segmentContacts(s.rules, brand.id, pool)).length))
 
   const table = (
     <div className="card">
@@ -67,7 +69,7 @@ export default async function Segments({ searchParams }: { searchParams: Promise
     </div>
   )
 
-  const options = canEdit ? await segmentOptions() : null
+  const options = canEdit ? await segmentOptions(brand.id) : null
   const form = options && (
     <form
       className="panel-sec"
@@ -82,7 +84,11 @@ export default async function Segments({ searchParams }: { searchParams: Promise
           redirect('/segments?error=rules')
         }
         if (!name) redirect('/segments?error=name')
-        const { data: created, error: err } = await db().from('segments').insert({ name, rules, created_by: actor.email }).select('id').single()
+        const { data: created, error: err } = await db()
+          .from('segments')
+          .insert({ name, rules, created_by: actor.email, brand_id: (await currentBrand()).id })
+          .select('id')
+          .single()
         if (err || !created) redirect('/segments?error=exists')
         await audit(actor.email, 'segment.created', { type: 'segment', id: created.id }, { name })
         redirect(`/segments/${created.id}`)

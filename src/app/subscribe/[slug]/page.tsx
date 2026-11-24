@@ -1,6 +1,7 @@
 import { headers } from 'next/headers'
 import { notFound, redirect } from 'next/navigation'
 
+import { getBrand } from '@/lib/brand'
 import { db } from '@/lib/db'
 import { clientIp, resultMessage, subscribe, type SignupForm } from '@/lib/subscribe'
 
@@ -12,6 +13,7 @@ export default async function SubscribePage({ params, searchParams }: { params: 
   const { data } = await db().from('signup_forms').select('*').eq('slug', slug).maybeSingle()
   const form = data as SignupForm | null
   if (!form) notFound()
+  const brand = await getBrand(form.brand_id)
   const shown = r ? resultMessage(form, r) : null
   const m = shown && (r === 'done' || r === 'pending') ? shown : null
   const e = shown && !m ? shown : null
@@ -32,6 +34,9 @@ export default async function SubscribePage({ params, searchParams }: { params: 
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM22 6l-10 7L2 6" />
           </svg>
+        </div>
+        <div className="muted" style={{ marginBottom: 4 }}>
+          {brand.name}
         </div>
         <h1 style={{ marginBottom: 6 }}>{form.title}</h1>
         {form.blurb && (
@@ -56,7 +61,7 @@ export default async function SubscribePage({ params, searchParams }: { params: 
               Subscribe
             </button>
             <p className="muted" style={{ marginBottom: 0 }}>
-              You can unsubscribe at any time from any email.
+              You can unsubscribe from {brand.name} at any time from any email.
             </p>
           </>
         )}

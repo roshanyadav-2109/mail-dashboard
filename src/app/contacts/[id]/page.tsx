@@ -3,12 +3,12 @@ import { notFound, redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 
 import { audit } from '@/lib/audit'
+import { blockingScopes, currentBrand } from '@/lib/brand'
 import { db } from '@/lib/db'
 import { requireRole } from '@/lib/guard'
 import { atLeast } from '@/lib/roles'
 import { bestTimes, hourLabel } from '@/lib/besttime'
 import { gmailCompose } from '@/lib/gmail'
-import { getSettings } from '@/lib/settings'
 import { suppress } from '@/lib/suppress'
 import { contactTimeline } from '@/lib/timeline'
 
@@ -38,20 +38,23 @@ export default async function ContactDetail({ params }: { params: Promise<{ id: 
   const canEdit = atLeast(me.role, 'sender')
   const { id } = await params
   const sb = db()
+  const brand = await currentBrand()
   const { data } = await sb.from('contacts').select('*').eq('id', id).maybeSingle()
   if (!data) notFound()
+  // A contact of another business: back to this business's list.
+  if (data.brand_id !== brand.id) redirect('/contacts')
   const c = data as Contact
 
   const [{ data: allGroups }, { data: memberships }, { data: sup }, { data: outs }, { data: msgs }] = await Promise.all([
-    sb.from('groups').select('id, name').order('name'),
+    sb.from('groups').select('id, name').eq('brand_id', brand.id).order('name'),
     sb.from('group_members').select('group_id').eq('contact_id', id),
-    sb.from('suppressions').select('reason, created_at').eq('email', c.email).maybeSingle(),
+    sb.from('suppressions').select('reason, created_at').in('scope', blockingScopes(brand.id)).eq('email', c.email).order('created_at').limit(1).maybeSingle(),
     sb.from('group_optouts').select('group_id').eq('email', c.email),
-    sb.from('messages').select('id, status, opens, clicks, sent_at, campaigns(id, subject)').eq('email', c.email).order('sent_at', { ascending: false }).limit(50),
+    sb.from('messages').select('id, status, opens, clicks, sent_at, campaigns!inner(id, subject, brand_id)').eq('campaigns.brand_id', brand.id).eq('email', c.email).order('sent_at', { ascending: false }).limit(50),
   ])
   const inGroup = new Set((memberships ?? []).map((m: { group_id: string }) => m.group_id))
   const leftGroup = new Set((outs ?? []).map((o: { group_id: string }) => o.group_id))
-  const [timeline, best, settings] = await Promise.all([contactTimeline(id, c.email), bestTimes([c.email]), getSettings()])
+  const [timeline, best] = await Promise.all([contactTimeline(id, c.email, brand.id), bestTimes([c.email])])
   const bt = best.get(c.email)
 
   const main = (
@@ -118,6 +121,7 @@ export default async function ContactDetail({ params }: { params: Promise<{ id: 
         action={async (form) => {
           'use server'
           const actor = await requireRole('sender')
+          const b = await currentBrand()
           const tags = String(form.get('tags') ?? '')
             .split(',')
             .map((t) => t.trim())
@@ -126,6 +130,7 @@ export default async function ContactDetail({ params }: { params: Promise<{ id: 
             .from('contacts')
             .update({ name: String(form.get('name') ?? '').trim(), tags, fields: textToFields(String(form.get('fields') ?? '')), updated_at: new Date().toISOString() })
             .eq('id', id)
+            .eq('brand_id', b.id)
           await audit(actor.email, 'contact.updated', { type: 'contact', id: c.email })
           revalidatePath(`/contacts/${id}`)
         }}
@@ -150,12 +155,16 @@ export default async function ContactDetail({ params }: { params: Promise<{ id: 
         action={async (form) => {
           'use server'
           const actor = await requireRole('sender')
-          const chosen = new Set(form.getAll('group').map(String))
+          const b = await currentBrand()
           const sb2 = db()
+          // Only this business's groups can be ticked.
+          const { data: own } = await sb2.from('groups').select('id').eq('brand_id', b.id)
+          const ownIds = new Set((own ?? []).map((g: { id: string }) => g.id))
+          const chosen = new Set(form.getAll('group').map(String).filter((g) => ownIds.has(g)))
           const { data: current } = await sb2.from('group_members').select('group_id').eq('contact_id', id)
           const had = new Set((current ?? []).map((m: { group_id: string }) => m.group_id))
           const add = [...chosen].filter((g) => !had.has(g))
-          const remove = [...had].filter((g) => !chosen.has(g))
+          const remove = [...had].filter((g) => ownIds.has(g) && !chosen.has(g))
           if (add.length) await sb2.from('group_members').insert(add.map((group_id) => ({ group_id, contact_id: id })))
           if (remove.length) await sb2.from('group_members').delete().eq('contact_id', id).in('group_id', remove)
           await audit(actor.email, 'contact.groups_changed', { type: 'contact', id: c.email }, { added: add.length, removed: remove.length })
@@ -186,7 +195,8 @@ export default async function ContactDetail({ params }: { params: Promise<{ id: 
               action={async () => {
                 'use server'
                 const actor = await requireRole('sender')
-                await suppress(c.email, 'manual', 'blocked from contact page')
+                const b = await currentBrand()
+                await suppress(c.email, 'manual', 'blocked from contact page', null, b.id)
                 await audit(actor.email, 'suppression.added', { type: 'contact', id: c.email })
                 revalidatePath(`/contacts/${id}`)
               }}
@@ -200,7 +210,8 @@ export default async function ContactDetail({ params }: { params: Promise<{ id: 
             action={async () => {
               'use server'
               const actor = await requireRole('sender')
-              await db().from('contacts').delete().eq('id', id)
+              const b = await currentBrand()
+              await db().from('contacts').delete().eq('id', id).eq('brand_id', b.id)
               await audit(actor.email, 'contact.deleted', { type: 'contact', id: c.email })
               redirect('/contacts')
             }}
@@ -220,7 +231,7 @@ export default async function ContactDetail({ params }: { params: Promise<{ id: 
       description={c.name ? c.email : undefined}
       back={{ href: '/contacts', name: 'Contacts' }}
       actions={
-        <a className="btn ghost" href={gmailCompose(settings.reply_to, c.email, '', c.name ? `Hi ${c.name.split(' ')[0]},
+        <a className="btn ghost" href={gmailCompose(brand.reply_to ?? '', c.email, '', c.name ? `Hi ${c.name.split(' ')[0]},
 
 ` : '')} target="_blank" rel="noreferrer" title="Opens Gmail — sent from the desk inbox, no AWS cost">
           Write in Gmail

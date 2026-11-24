@@ -1,10 +1,12 @@
 import Link from 'next/link'
 import { Suspense } from 'react'
 
+import { blockingScopes, currentBrand } from '@/lib/brand'
 import { db } from '@/lib/db'
 import { requireRole } from '@/lib/guard'
 import { LEVEL_LABEL, senderHealth } from '@/lib/health'
 import { atLeast } from '@/lib/roles'
+import { senderAddress } from '@/lib/ses'
 
 import AwsCard from './aws-card'
 
@@ -68,18 +70,26 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ d
   const me = await requireRole('viewer')
   const { denied } = await searchParams
   const sb = db()
+  const brand = await currentBrand()
   const [{ data: c }, { data: l }, { data: e }, { count: blockedCount }, health, { data: waiting }, { count: toReview }] = await Promise.all([
-    sb.from('campaign_stats').select('*').order('created_at', { ascending: false }).limit(200),
-    sb.from('groups').select('id, name, group_members(count)').order('created_at', { ascending: false }).limit(3),
-    sb.from('ses_events').select('id, event_type, email, created_at').order('id', { ascending: false }).limit(5),
-    sb.from('suppressions').select('email', { count: 'exact', head: true }),
-    senderHealth(30),
-    sb.from('campaigns').select('id, subject, status, scheduled_at').in('status', ['pending_approval', 'scheduled']).order('scheduled_at'),
-    sb.from('suppressions').select('email', { count: 'exact', head: true }).eq('reason', 'unsubscribe').is('reviewed_at', null),
+    sb.from('campaign_stats').select('*').eq('brand_id', brand.id).order('created_at', { ascending: false }).limit(200),
+    sb.from('groups').select('id, name, group_members(count)').eq('brand_id', brand.id).order('created_at', { ascending: false }).limit(3),
+    sb.from('ses_events').select('id, event_type, email, created_at, ses_message_id').order('id', { ascending: false }).limit(40),
+    sb.from('suppressions').select('email', { count: 'exact', head: true }).in('scope', blockingScopes(brand.id)),
+    senderHealth(30, brand.id),
+    sb.from('campaigns').select('id, subject, status, scheduled_at').eq('brand_id', brand.id).in('status', ['pending_approval', 'scheduled']).order('scheduled_at'),
+    sb.from('suppressions').select('email', { count: 'exact', head: true }).eq('scope', brand.id).eq('reason', 'unsubscribe').is('reviewed_at', null),
   ])
   const campaigns = (c ?? []) as Campaign[]
   const groups = (l ?? []) as Group[]
-  const events = (e ?? []) as Event[]
+  // Delivery events carry no brand; keep those whose message belongs to one of this brand's campaigns.
+  const recent = (e ?? []) as (Event & { ses_message_id: string | null })[]
+  const ids = recent.map((x) => x.ses_message_id).filter((x): x is string => !!x)
+  const { data: mine } = ids.length
+    ? await sb.from('messages').select('ses_message_id, campaigns!inner(brand_id)').eq('campaigns.brand_id', brand.id).in('ses_message_id', ids)
+    : { data: [] }
+  const ours = new Set((mine ?? []).map((m: { ses_message_id: string }) => m.ses_message_id))
+  const events = recent.filter((x) => x.ses_message_id && ours.has(x.ses_message_id)).slice(0, 5) as Event[]
 
   const sum = (k: keyof Campaign) => campaigns.reduce((a, r) => a + Number(r[k] ?? 0), 0)
   const sent = sum('sent')
@@ -111,7 +121,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ d
         </Link>
       ))}
       <a className="pill-banner" href="/settings">
-        Sending as <strong>mail@unknowniitians.in</strong>
+        Sending as <strong>{senderAddress(brand)}</strong>
         <span className="dot ok" style={{ margin: '0 0 0 4px' }} />
       </a>
 

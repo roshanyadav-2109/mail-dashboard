@@ -1,4 +1,5 @@
 import { audit } from '@/lib/audit'
+import { currentBrand } from '@/lib/brand'
 import { db } from '@/lib/db'
 import { cleanDraft, type DraftInput } from '@/lib/draft'
 import { apiRole } from '@/lib/guard'
@@ -15,6 +16,7 @@ export async function PATCH(req: Request, { params }: Ctx) {
     .from('campaigns')
     .update({ ...value, updated_at: new Date().toISOString() })
     .eq('id', id)
+    .eq('brand_id', (await currentBrand()).id)
     .eq('status', 'draft')
     .select('id, updated_at')
   if (!data?.length) return Response.json({ error: 'This campaign is no longer a draft' }, { status: 409 })
@@ -25,7 +27,7 @@ export async function DELETE(_req: Request, { params }: Ctx) {
   const me = await apiRole('sender')
   if (!me) return Response.json({ error: 'forbidden' }, { status: 403 })
   const { id } = await params
-  const { data } = await db().from('campaigns').delete().eq('id', id).eq('status', 'draft').select('subject')
+  const { data } = await db().from('campaigns').delete().eq('id', id).eq('brand_id', (await currentBrand()).id).eq('status', 'draft').select('subject')
   if (!data?.length) return Response.json({ error: 'Only drafts can be deleted' }, { status: 409 })
   await audit(me.email, 'campaign.draft_deleted', { type: 'campaign', id }, { subject: data[0].subject })
   return Response.json({ ok: true })

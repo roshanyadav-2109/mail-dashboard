@@ -1,4 +1,5 @@
 import { alertScheduledFinished } from '@/lib/alerts'
+import { getBrand } from '@/lib/brand'
 import { buildIcs, type CalendarEvent } from '@/lib/calendar'
 import { db } from '@/lib/db'
 import { render, type MergeData } from '@/lib/render'
@@ -18,6 +19,7 @@ type Campaign = {
   reply_to: string | null
   attachments: StoredAttachment[]
   event: CalendarEvent | null
+  brand_id: string
 }
 
 // Each worker stays well under the SES limit (14/s); throttled sends are re-queued, never failed.
@@ -95,12 +97,14 @@ export async function processBatch(campaignId: string, opts: { size?: number; de
     .eq('status', 'sending')
     .lt('updated_at', new Date(Date.now() - STALE_MS).toISOString())
 
-  const { data } = await sb.from('campaigns').select('id, status, subject, preheader, format, html, text, reply_to, attachments, event').eq('id', campaignId).maybeSingle()
+  const { data } = await sb.from('campaigns').select('id, status, subject, preheader, format, html, text, reply_to, attachments, event, brand_id').eq('id', campaignId).maybeSingle()
   const campaign = data as Campaign | null
   if (!campaign) return { processed: 0, remaining: 0 }
   if (campaign.status !== 'sending') return { processed: 0, remaining: await pendingCount(campaignId), paused: 'status' }
 
   const settings = await getSettings()
+  const brand = await getBrand(campaign.brand_id)
+  // The daily limit is shared: every brand sends through the same SES account.
   const allowance = settings.daily_limit - (await sentToday())
   if (allowance <= 0) return { processed: 0, remaining: await pendingCount(campaignId), paused: 'limit' }
 
@@ -121,7 +125,7 @@ export async function processBatch(campaignId: string, opts: { size?: number; de
   if (!batch.length) return { processed: 0, remaining: await pendingCount(campaignId) }
 
   // Merge data for everyone in the batch.
-  const { data: people } = await sb.from('contacts').select('email, name, fields').in('email', batch.map((m) => m.email))
+  const { data: people } = await sb.from('contacts').select('email, name, fields').eq('brand_id', brand.id).in('email', batch.map((m) => m.email))
   const byEmail = new Map(((people ?? []) as MergeData[]).map((p) => [p.email, p]))
 
   let attachments: Attachment[] = []
@@ -145,23 +149,24 @@ export async function processBatch(campaignId: string, opts: { size?: number; de
       (async () => {
         try {
           const id = await sendEmail({
+            brand,
             to: m.email,
             subject: render(campaign.subject, person),
             preheader: render(campaign.preheader ?? '', person),
             format: campaign.format,
             html: render(campaign.html, person, true),
             text: render(campaign.text ?? '', person),
-            replyTo: campaign.reply_to || settings.reply_to || null,
-            fromName: settings.sender_name,
+            replyTo: campaign.reply_to || brand.reply_to || null,
+            fromName: brand.sender_name,
             campaignId,
             attachments,
             icalEvent: campaign.event
               ? buildIcs(campaign.event, {
-                  uid: `${campaignId}@unknowniitians.in`,
+                  uid: `${campaignId}@${brand.domain}`,
                   // The organiser must be the sending address: Gmail only treats an invite as genuine (and adds it to the
-                  // calendar) when it matches the authenticated sender. RSVPs reach desk@ via forwarding of this address.
-                  organizer: senderAddress(),
-                  organizerName: settings.sender_name,
+                  // calendar) when it matches the authenticated sender.
+                  organizer: senderAddress(brand),
+                  organizerName: brand.sender_name,
                   attendee: m.email,
                 })
               : undefined,

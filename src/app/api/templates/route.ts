@@ -1,4 +1,5 @@
 import { audit } from '@/lib/audit'
+import { currentBrand } from '@/lib/brand'
 import { db } from '@/lib/db'
 import { apiRole } from '@/lib/guard'
 import { cleanTemplate, type TemplateBody } from '@/lib/templates'
@@ -10,7 +11,7 @@ export async function POST(req: Request) {
   const body = (await req.json()) as TemplateBody
   const { data, error } = await db()
     .from('templates')
-    .insert({ name: 'Untitled template', ...cleanTemplate(body), is_starter: false, created_by: me.email })
+    .insert({ name: 'Untitled template', ...cleanTemplate(body), is_starter: false, created_by: me.email, brand_id: (await currentBrand()).id })
     .select('id')
     .single()
   if (error || !data) return Response.json({ error: error?.message ?? 'failed' }, { status: 500 })

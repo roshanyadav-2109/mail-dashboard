@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache'
 import { audit } from '@/lib/audit'
 import { db } from '@/lib/db'
 import { requireRole } from '@/lib/guard'
+import { currentBrand } from '@/lib/brand'
 import type { SignupForm } from '@/lib/subscribe'
 
 import PanelLayout from '../../panel-layout'
@@ -17,12 +18,15 @@ export default async function FormDetail({ params }: { params: Promise<{ id: str
   await requireRole('sender')
   const { id } = await params
   const sb = db()
+  const brand = await currentBrand()
   const { data } = await sb.from('signup_forms').select('*').eq('id', id).maybeSingle()
   if (!data) notFound()
+  // A form of another business: back to this business's list.
+  if (data.brand_id !== brand.id) redirect('/forms')
   const form = data as SignupForm
   const [{ data: groups }, { data: recent }, { count: pending }] = await Promise.all([
-    sb.from('groups').select('id, name').order('name'),
-    sb.from('contacts').select('id, email, name, created_at').eq('source', `form:${form.slug}`).order('created_at', { ascending: false }).limit(50),
+    sb.from('groups').select('id, name').eq('brand_id', brand.id).order('name'),
+    sb.from('contacts').select('id, email, name, created_at').eq('brand_id', brand.id).eq('source', `form:${form.slug}`).order('created_at', { ascending: false }).limit(50),
     sb.from('pending_subscriptions').select('token', { count: 'exact', head: true }).eq('form_id', id),
   ])
   const base = (process.env.APP_URL ?? '').replace(/\/$/, '')
@@ -94,6 +98,9 @@ export default async function FormDetail({ params }: { params: Promise<{ id: str
         action={async (fd) => {
           'use server'
           const actor = await requireRole('sender')
+          const b = await currentBrand()
+          const groupId = String(fd.get('group') ?? '')
+          const { data: own } = groupId ? await db().from('groups').select('id').eq('id', groupId).eq('brand_id', b.id).maybeSingle() : { data: null }
           await db()
             .from('signup_forms')
             .update({
@@ -101,11 +108,12 @@ export default async function FormDetail({ params }: { params: Promise<{ id: str
               title: String(fd.get('title') ?? '').trim() || form.title,
               blurb: String(fd.get('blurb') ?? '').trim(),
               success_message: String(fd.get('success') ?? '').trim() || 'Thanks for subscribing!',
-              group_id: String(fd.get('group') ?? '') || null,
+              group_id: own?.id ?? null,
               double_opt_in: fd.get('double_opt_in') === 'on',
               active: fd.get('active') === 'on',
             })
             .eq('id', id)
+            .eq('brand_id', b.id)
           await audit(actor.email, 'form.updated', { type: 'form', id })
           revalidatePath(`/forms/${id}`)
         }}
@@ -142,7 +150,8 @@ export default async function FormDetail({ params }: { params: Promise<{ id: str
         action={async () => {
           'use server'
           const actor = await requireRole('sender')
-          await db().from('signup_forms').delete().eq('id', id)
+          const b = await currentBrand()
+          await db().from('signup_forms').delete().eq('id', id).eq('brand_id', b.id)
           await audit(actor.email, 'form.deleted', { type: 'form', id }, { slug: form.slug })
           redirect('/forms')
         }}

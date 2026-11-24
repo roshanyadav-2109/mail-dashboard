@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 
 import { audit } from '@/lib/audit'
 import { segmentContacts, type Rules } from '@/lib/audience'
+import { currentBrand } from '@/lib/brand'
 import { db } from '@/lib/db'
 import { requireRole } from '@/lib/guard'
 import { atLeast } from '@/lib/roles'
@@ -18,10 +19,13 @@ export default async function SegmentDetail({ params }: { params: Promise<{ id: 
   const me = await requireRole('viewer')
   const canEdit = atLeast(me.role, 'sender')
   const { id } = await params
+  const brand = await currentBrand()
   const { data } = await db().from('segments').select('*').eq('id', id).maybeSingle()
   if (!data) notFound()
+  // A segment of another business: back to this business's list.
+  if (data.brand_id !== brand.id) redirect('/segments')
   const segment = data as { id: string; name: string; rules: Rules }
-  const matches = await segmentContacts(segment.rules)
+  const matches = await segmentContacts(segment.rules, brand.id)
 
   const main = (
     <div className="card">
@@ -65,7 +69,7 @@ export default async function SegmentDetail({ params }: { params: Promise<{ id: 
     </div>
   )
 
-  const options = canEdit ? await segmentOptions() : null
+  const options = canEdit ? await segmentOptions(brand.id) : null
   const panel = options && (
     <>
       <form
@@ -80,7 +84,11 @@ export default async function SegmentDetail({ params }: { params: Promise<{ id: 
           } catch {
             return
           }
-          await db().from('segments').update({ name, rules, updated_at: new Date().toISOString() }).eq('id', id)
+          await db()
+            .from('segments')
+            .update({ name, rules, updated_at: new Date().toISOString() })
+            .eq('id', id)
+            .eq('brand_id', (await currentBrand()).id)
           await audit(actor.email, 'segment.updated', { type: 'segment', id }, { name, rules: rules.conditions.length })
           revalidatePath(`/segments/${id}`)
         }}
@@ -98,7 +106,7 @@ export default async function SegmentDetail({ params }: { params: Promise<{ id: 
         action={async () => {
           'use server'
           const actor = await requireRole('sender')
-          await db().from('segments').delete().eq('id', id)
+          await db().from('segments').delete().eq('id', id).eq('brand_id', (await currentBrand()).id)
           await audit(actor.email, 'segment.deleted', { type: 'segment', id }, { name: segment.name })
           redirect('/segments')
         }}

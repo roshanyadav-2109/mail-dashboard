@@ -1,3 +1,4 @@
+import { blockingScopes } from '@/lib/brand'
 import { db } from '@/lib/db'
 import { matchesDomain } from '@/lib/domains'
 import { getExcludedDomains } from '@/lib/excluded'
@@ -48,12 +49,13 @@ export async function fetchAll<T>(build: (from: number, to: number) => PromiseLi
 const chunks = <T,>(list: T[], size = CHUNK) => Array.from({ length: Math.ceil(list.length / size) }, (_, i) => list.slice(i * size, i * size + size))
 
 /**
- * Creates or updates contacts by email and returns email → id.
+ * Creates or updates a brand's contacts by email and returns email → id. Each brand has its own contacts.
  * Existing contacts keep their name unless a non-empty one is given; fields and tags are merged, never wiped.
  */
 export async function upsertContacts(
   rows: { email: string; name?: string; fields?: Record<string, string>; tags?: string[] }[],
-  source = 'manual',
+  source: string,
+  brandId: string,
 ): Promise<Map<string, string>> {
   const sb = db()
   const byEmail = new Map<string, (typeof rows)[number]>()
@@ -71,9 +73,9 @@ export async function upsertContacts(
   const ids = new Map<string, string>()
 
   for (const part of chunks(emails)) {
-    const { data: existing } = await sb.from('contacts').select('id, email, name, fields, tags').in('email', part)
+    const { data: existing } = await sb.from('contacts').select('id, email, name, fields, tags').eq('brand_id', brandId).in('email', part)
     const found = new Map(((existing ?? []) as Pick<Contact, 'id' | 'email' | 'name' | 'fields' | 'tags'>[]).map((c) => [c.email, c]))
-    const fresh = part.filter((e) => !found.has(e)).map((e) => ({ ...byEmail.get(e)!, source }))
+    const fresh = part.filter((e) => !found.has(e)).map((e) => ({ ...byEmail.get(e)!, source, brand_id: brandId }))
     if (fresh.length) {
       const { data: inserted } = await sb.from('contacts').insert(fresh).select('id, email')
       inserted?.forEach((c: { id: string; email: string }) => ids.set(c.email, c.id))
@@ -111,20 +113,22 @@ export async function groupEmails(groupId: string): Promise<string[]> {
   return rows.map((r) => r.contacts?.email).filter((e): e is string => !!e)
 }
 
-export async function allContacts(): Promise<Contact[]> {
-  return fetchAll<Contact>((from, to) => db().from('contacts').select('id, email, name, fields, tags, source, created_at').order('email').range(from, to))
+export async function allContacts(brandId: string): Promise<Contact[]> {
+  return fetchAll<Contact>((from, to) => db().from('contacts').select('id, email, name, fields, tags, source, created_at').eq('brand_id', brandId).order('email').range(from, to))
 }
 
-async function engagedEmails(op: 'opened' | 'clicked', value: string): Promise<Set<string>> {
+async function engagedEmails(op: 'opened' | 'clicked', value: string, brandId: string): Promise<Set<string>> {
   const col = op === 'opened' ? 'opens' : 'clicks'
   let campaignId = value
   if (value === 'any30') {
     const since = new Date(Date.now() - 30 * 86_400_000).toISOString()
-    const rows = await fetchAll<{ email: string }>((from, to) => db().from('messages').select('email').gt(col, 0).gte('sent_at', since).range(from, to))
+    const rows = await fetchAll<{ email: string }>((from, to) =>
+      db().from('messages').select('email, campaigns!inner(brand_id)').eq('campaigns.brand_id', brandId).gt(col, 0).gte('sent_at', since).range(from, to),
+    )
     return new Set(rows.map((r) => r.email))
   }
   if (value === 'last') {
-    const { data } = await db().from('campaigns').select('id').eq('status', 'sent').order('created_at', { ascending: false }).limit(1)
+    const { data } = await db().from('campaigns').select('id').eq('brand_id', brandId).eq('status', 'sent').order('created_at', { ascending: false }).limit(1)
     campaignId = data?.[0]?.id
     if (!campaignId) return new Set()
   }
@@ -133,8 +137,8 @@ async function engagedEmails(op: 'opened' | 'clicked', value: string): Promise<S
 }
 
 /** Contacts matching a segment's rules. */
-export async function segmentContacts(rules: Rules, pool?: Contact[]): Promise<Contact[]> {
-  const contacts = pool ?? (await allContacts())
+export async function segmentContacts(rules: Rules, brandId: string, pool?: Contact[]): Promise<Contact[]> {
+  const contacts = pool ?? (await allContacts(brandId))
   if (!rules.conditions.length) return []
 
   // Pre-load the sets each condition needs, once.
@@ -145,7 +149,7 @@ export async function segmentContacts(rules: Rules, pool?: Contact[]): Promise<C
     if (c.type === 'engagement') {
       const kind = c.op.includes('opened') ? 'opened' : 'clicked'
       const key = `${kind}:${c.value}`
-      if (!engagement.has(key)) engagement.set(key, await engagedEmails(kind, c.value))
+      if (!engagement.has(key)) engagement.set(key, await engagedEmails(kind, c.value, brandId))
     }
   }
 
@@ -201,26 +205,29 @@ export type Resolved = {
  * Final recipient list for a send: members of the chosen groups (minus anyone who left that group),
  * contacts in the chosen segments, and individually typed addresses — de-duplicated, minus suppressions.
  */
-export async function resolveAudience(audience: Audience): Promise<Resolved> {
+export async function resolveAudience(audience: Audience, brandId: string): Promise<Resolved> {
   const sb = db()
   const set = new Set<string>()
   const optedOut = new Set<string>()
 
-  for (const groupId of audience.groups ?? []) {
+  // Only this brand's own groups count, whatever ids the draft holds.
+  const { data: own } = await sb.from('groups').select('id').eq('brand_id', brandId).in('id', audience.groups?.length ? audience.groups : ['00000000-0000-0000-0000-000000000000'])
+  const ownGroups = new Set((own ?? []).map((g: { id: string }) => g.id))
+  for (const groupId of (audience.groups ?? []).filter((g) => ownGroups.has(g))) {
     const members = await groupEmails(groupId)
     const { data: outs } = await sb.from('group_optouts').select('email').eq('group_id', groupId)
     const left = new Set((outs ?? []).map((o: { email: string }) => o.email))
     for (const e of members) (left.has(e) ? optedOut : set).add(e)
   }
   for (const segmentId of audience.segments ?? []) {
-    const { data: seg } = await sb.from('segments').select('rules').eq('id', segmentId).maybeSingle()
-    if (seg) (await segmentContacts(seg.rules as Rules)).forEach((c) => set.add(c.email))
+    const { data: seg } = await sb.from('segments').select('rules').eq('brand_id', brandId).eq('id', segmentId).maybeSingle()
+    if (seg) (await segmentContacts(seg.rules as Rules, brandId)).forEach((c) => set.add(c.email))
   }
   if (audience.allContacts) {
-    ;(await fetchAll<{ email: string }>((from, to) => sb.from('contacts').select('email').order('email').range(from, to))).forEach((c) => set.add(c.email))
+    ;(await fetchAll<{ email: string }>((from, to) => sb.from('contacts').select('email').eq('brand_id', brandId).order('email').range(from, to))).forEach((c) => set.add(c.email))
   } else if (audience.prefixes?.length) {
     const prefixes = audience.prefixes.map(cleanPrefix).filter((p): p is string => !!p)
-    if (prefixes.length) (await fetchAll<{ email: string }>((from, to) => sb.rpc('contacts_with_prefixes', { prefixes }).range(from, to))).forEach((c) => set.add(c.email))
+    if (prefixes.length) (await fetchAll<{ email: string }>((from, to) => sb.rpc('contacts_with_prefixes', { prefixes, brand: brandId }).range(from, to))).forEach((c) => set.add(c.email))
   }
   for (const e of audience.emails ?? []) set.add(e.trim().toLowerCase())
   for (const e of audience.exclude ?? []) set.delete(e.trim().toLowerCase())
@@ -230,10 +237,11 @@ export async function resolveAudience(audience: Audience): Promise<Resolved> {
   const all = [...set]
   const blocked = new Set<string>()
   for (const part of chunks(all)) {
-    const { data } = await sb.from('suppressions').select('email').in('email', part)
+    // Shared blocks (bounces, complaints) plus this brand's own unsubscribes and manual blocks.
+    const { data } = await sb.from('suppressions').select('email').in('scope', blockingScopes(brandId)).in('email', part)
     data?.forEach((r: { email: string }) => blocked.add(r.email))
   }
-  const patterns = [...(audience.excludeDomains ?? []), ...(await getExcludedDomains())]
+  const patterns = [...(audience.excludeDomains ?? []), ...(await getExcludedDomains(brandId))]
   const domainExcluded = patterns.length ? all.filter((e) => !blocked.has(e) && matchesDomain(e, patterns)) : []
   const dropped = new Set(domainExcluded)
   return { emails: all.filter((e) => !blocked.has(e) && !dropped.has(e)), suppressed: [...blocked], optedOut: [...optedOut], domainExcluded }

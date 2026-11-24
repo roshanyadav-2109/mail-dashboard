@@ -49,6 +49,8 @@ export default function Composer(props: {
   groups: { id: string; name: string; count: number }[]
   segments: { id: string; name: string }[]
   fromLine: string
+  /** The sending address of the current business (organiser of calendar invites). */
+  fromAddress: string
   defaultReplyTo: string
   defaultTestTo: string[]
 }) {
@@ -774,7 +776,7 @@ export default function Composer(props: {
                   )}
                   <textarea rows={2} value={event.description ?? ''} onChange={(e) => setEvent({ ...event, description: e.target.value })} placeholder="Details (optional)" aria-label="Event details" />
                   <p className="muted" style={{ margin: 0 }}>
-                    Goes straight into each person’s Google / Outlook / Apple calendar when the email arrives (unless they turned that off). A meeting link is only included if you add one. Yes / No / Maybe replies go to the sending address (mail@unknowniitians.in). Send a test to yourself and check your calendar.
+                    Goes straight into each person’s Google / Outlook / Apple calendar when the email arrives (unless they turned that off). A meeting link is only included if you add one. Yes / No / Maybe replies go to the sending address ({props.fromAddress}). Send a test to yourself and check your calendar.
                   </p>
                 </div>
               )}

@@ -2,21 +2,25 @@ import { redirect } from 'next/navigation'
 
 import { audit } from '@/lib/audit'
 import { addToGroup, upsertContacts } from '@/lib/audience'
+import { blockingScopes, getBrand } from '@/lib/brand'
 import { db } from '@/lib/db'
+import { campaignBrand } from '@/lib/suppress'
 import { readToken } from '@/lib/unsub'
 
 export const dynamic = 'force-dynamic'
 
 type Topic = { id: string; name: string; topic_description: string }
 
-/** Current topic choices for one person: member of the group and not opted out. */
-async function load(email: string) {
+/** Current topic choices for one person within one business: member of the group and not opted out. */
+async function load(email: string, brandId: string) {
   const sb = db()
-  const { data: topics } = await sb.from('groups').select('id, name, topic_description').eq('is_topic', true).order('name')
-  const { data: contact } = await sb.from('contacts').select('id').eq('email', email).maybeSingle()
+  const { data: topics } = await sb.from('groups').select('id, name, topic_description').eq('brand_id', brandId).eq('is_topic', true).order('name')
+  const { data: contact } = await sb.from('contacts').select('id').eq('brand_id', brandId).eq('email', email).maybeSingle()
   const { data: members } = contact ? await sb.from('group_members').select('group_id').eq('contact_id', contact.id) : { data: [] }
   const { data: outs } = await sb.from('group_optouts').select('group_id').eq('email', email)
-  const { data: sup } = await sb.from('suppressions').select('reason').eq('email', email).maybeSingle()
+  // A shared block (bounce, complaint) wins over this business's own unsubscribe.
+  const { data: sups } = await sb.from('suppressions').select('reason, scope').eq('email', email).in('scope', blockingScopes(brandId))
+  const sup = (sups ?? []).find((s: { scope: string }) => s.scope === '*') ?? (sups ?? [])[0]
   const inGroup = new Set((members ?? []).map((m: { group_id: string }) => m.group_id))
   const left = new Set((outs ?? []).map((o: { group_id: string }) => o.group_id))
   return { topics: (topics ?? []) as Topic[], inGroup, left, suppressed: (sup?.reason as string | undefined) ?? null }
@@ -37,12 +41,17 @@ export default async function Preferences({ params, searchParams }: { params: Pr
     )
   }
   const email = data.email.toLowerCase()
-  const state = await load(email)
+  // Preferences belong to the business that sent the email.
+  const brand = await getBrand(data.brandId ?? (await campaignBrand(data.campaignId)))
+  const state = await load(email, brand.id)
 
   return (
     <div className="center">
       <div className="card login" style={{ textAlign: 'left', width: 480 }}>
         <h1 style={{ marginBottom: 4 }}>Email preferences</h1>
+        <p className="muted" style={{ margin: 0 }}>
+          {brand.name}
+        </p>
         <p className="muted" style={{ marginTop: 0 }}>
           {email}
         </p>
@@ -52,12 +61,12 @@ export default async function Preferences({ params, searchParams }: { params: Pr
           <form
             action={async () => {
               'use server'
-              await db().from('suppressions').delete().eq('email', email).eq('reason', 'unsubscribe')
+              await db().from('suppressions').delete().eq('email', email).eq('reason', 'unsubscribe').eq('scope', brand.id)
               await audit(email, 'contact.resubscribed', { type: 'contact', id: email }, { via: 'preference centre' })
               redirect(`/preferences/${token}?saved=1`)
             }}
           >
-            <p>You’re unsubscribed from all our emails.</p>
+            <p>You’re unsubscribed from all emails from {brand.name}.</p>
             <button type="submit" style={{ width: '100%' }}>
               Subscribe again
             </button>
@@ -70,7 +79,7 @@ export default async function Preferences({ params, searchParams }: { params: Pr
           <form
             action={async (fd) => {
               'use server'
-              const s = await load(email)
+              const s = await load(email, brand.id)
               const wanted = new Set(fd.getAll('topic').map(String))
               const sb = db()
               const joined: string[] = []
@@ -79,7 +88,7 @@ export default async function Preferences({ params, searchParams }: { params: Pr
                 const active = s.inGroup.has(t.id) && !s.left.has(t.id)
                 if (wanted.has(t.id) && !active) {
                   if (!s.inGroup.has(t.id)) {
-                    const ids = await upsertContacts([{ email }], 'preference centre')
+                    const ids = await upsertContacts([{ email }], 'preference centre', brand.id)
                     await addToGroup(t.id, [...ids.values()])
                   }
                   await sb.from('group_optouts').delete().eq('email', email).eq('group_id', t.id)

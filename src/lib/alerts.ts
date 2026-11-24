@@ -1,4 +1,6 @@
 import { audit } from '@/lib/audit'
+import { fetchAll } from '@/lib/audience'
+import { DEFAULT_BRAND, getBrand } from '@/lib/brand'
 import { db } from '@/lib/db'
 import { reportRecipients } from '@/lib/report'
 import { sendEmail } from '@/lib/ses'
@@ -31,8 +33,11 @@ async function claim(campaignId: string, kind: Kind, day?: string): Promise<bool
 }
 
 async function send(kind: Kind, campaignId: string, subject: string, lines: string[], cta = 'Open campaign') {
-  const s = await getSettings()
   const to = await recipients()
+  const { data: c } = await db().from('campaigns').select('brand_id').eq('id', campaignId).maybeSingle()
+  const brand = await getBrand(c?.brand_id)
+  // With several businesses, say which one the alert is about.
+  if (brand.id !== DEFAULT_BRAND) subject = `[${brand.name}] ${subject}`
   const link = `${app()}/campaigns/${campaignId}`
   const html = `<div style="font-family:Arial,sans-serif;max-width:520px;margin:auto;padding:24px;color:#1f2328">
 <h2 style="margin:0 0 12px;font-size:18px">${esc(subject)}</h2>
@@ -40,7 +45,7 @@ ${lines.map((l) => `<p style="margin:0 0 8px;line-height:1.6">${l}</p>`).join(''
 <p style="margin:18px 0 0"><a href="${link}" style="display:inline-block;background:#0051c3;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;font-weight:bold">${cta}</a></p>
 <p style="margin:18px 0 0;color:#6b7280;font-size:12px">Alert from your Mail Dashboard. Turn alerts on or off in Settings.</p></div>`
   const text = `${subject}\n\n${lines.map((l) => l.replace(/<[^>]+>/g, '')).join('\n')}\n\n${link}`
-  for (const email of to) await sendEmail({ to: email, subject: `⚠ ${subject}`.replace('⚠ ✓', '✓'), format: 'html', html, text, fromName: s.sender_name })
+  for (const email of to) await sendEmail({ brand, to: email, subject: `⚠ ${subject}`.replace('⚠ ✓', '✓'), format: 'html', html, text })
   await audit('system', 'alert.sent', { type: 'campaign', id: campaignId }, { kind, to })
 }
 
@@ -50,9 +55,9 @@ async function subjectOf(id: string) {
 }
 
 async function counts(id: string) {
-  const { data } = await db().from('messages').select('status').eq('campaign_id', id).limit(100000)
+  const rows = await fetchAll<{ status: string }>((from, to) => db().from('messages').select('status').eq('campaign_id', id).order('id').range(from, to))
   const c: Record<string, number> = {}
-  for (const m of (data ?? []) as { status: string }[]) c[m.status] = (c[m.status] ?? 0) + 1
+  for (const m of rows) c[m.status] = (c[m.status] ?? 0) + 1
   const sent = (c.sent ?? 0) + (c.delivered ?? 0) + (c.bounced ?? 0) + (c.complained ?? 0)
   return { c, sent }
 }

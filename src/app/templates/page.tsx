@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
 import { audit } from '@/lib/audit'
+import { currentBrand } from '@/lib/brand'
 import { db } from '@/lib/db'
 import { requireRole } from '@/lib/guard'
 import { atLeast } from '@/lib/roles'
@@ -19,7 +20,9 @@ export default async function Templates() {
   const me = await requireRole('viewer')
   const canEdit = atLeast(me.role, 'sender')
   await ensureStarters()
-  const { data } = await db().from('templates').select('*').order('is_starter').order('updated_at', { ascending: false })
+  const brand = await currentBrand()
+  // This business's own templates plus the shared starter ones.
+  const { data } = await db().from('templates').select('*').or(`brand_id.eq.${brand.id},is_starter.eq.true`).order('is_starter').order('updated_at', { ascending: false })
   const templates = (data ?? []) as Template[]
 
   const thumb = (t: Template) =>
@@ -63,7 +66,7 @@ export default async function Templates() {
                       const actor = await requireRole('sender')
                       const { data: copy } = await db()
                         .from('templates')
-                        .insert({ name: `${t.name} (copy)`, category: t.category, subject: t.subject, format: t.format, html: t.html, text: t.text, blocks: (await db().from('templates').select('blocks').eq('id', t.id).single()).data?.blocks ?? null, is_starter: false, created_by: actor.email })
+                        .insert({ name: `${t.name} (copy)`, category: t.category, subject: t.subject, format: t.format, html: t.html, text: t.text, blocks: (await db().from('templates').select('blocks').eq('id', t.id).single()).data?.blocks ?? null, is_starter: false, created_by: actor.email, brand_id: (await currentBrand()).id })
                         .select('id')
                         .single()
                       if (copy) {

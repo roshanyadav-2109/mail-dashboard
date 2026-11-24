@@ -1,3 +1,4 @@
+import { blockingScopes } from '@/lib/brand'
 import { db } from '@/lib/db'
 
 export type TimelineItem = { at: string; kind: string; text: string; href?: string; tone?: 'good' | 'bad' | 'warn' | 'muted' }
@@ -16,14 +17,14 @@ const AUDIT_TEXT: Record<string, string> = {
 }
 
 /** Everything that happened with one contact, newest first. Automated scanner opens/clicks are left out. */
-export async function contactTimeline(contactId: string, email: string): Promise<TimelineItem[]> {
+export async function contactTimeline(contactId: string, email: string, brandId: string): Promise<TimelineItem[]> {
   const sb = db()
   const [contact, members, outs, sup, msgs, events, audits] = await Promise.all([
     sb.from('contacts').select('created_at, source').eq('id', contactId).maybeSingle(),
     sb.from('group_members').select('added_at, groups(id, name)').eq('contact_id', contactId),
-    sb.from('group_optouts').select('created_at, groups(id, name)').eq('email', email),
-    sb.from('suppressions').select('created_at, reason, detail').eq('email', email).maybeSingle(),
-    sb.from('messages').select('ses_message_id, sent_at, status, campaigns(id, subject)').eq('email', email).not('sent_at', 'is', null).order('sent_at', { ascending: false }).limit(200),
+    sb.from('group_optouts').select('created_at, groups!inner(id, name, brand_id)').eq('groups.brand_id', brandId).eq('email', email),
+    sb.from('suppressions').select('created_at, reason, detail').in('scope', blockingScopes(brandId)).eq('email', email).order('created_at').limit(1).maybeSingle(),
+    sb.from('messages').select('ses_message_id, sent_at, status, campaigns!inner(id, subject, brand_id)').eq('campaigns.brand_id', brandId).eq('email', email).not('sent_at', 'is', null).order('sent_at', { ascending: false }).limit(200),
     sb.from('ses_events').select('ses_message_id, event_type, created_at, payload, automated').eq('email', email).order('created_at', { ascending: false }).limit(1000),
     sb.from('audit_log').select('at, actor, action, detail').eq('target_id', email).like('action', 'contact.%').order('at', { ascending: false }).limit(200),
   ])

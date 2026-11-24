@@ -1,4 +1,5 @@
 import { audit } from '@/lib/audit'
+import { currentBrand } from '@/lib/brand'
 import { db } from '@/lib/db'
 import { cleanDraft, type DraftInput } from '@/lib/draft'
 import { apiRole } from '@/lib/guard'
@@ -9,9 +10,10 @@ export async function POST(req: Request) {
   if (!me) return Response.json({ error: 'forbidden' }, { status: 403 })
   const { value, error } = cleanDraft((await req.json()) as DraftInput)
   if (error) return Response.json({ error }, { status: 400 })
+  const brand = await currentBrand()
   const { data, error: dbError } = await db()
     .from('campaigns')
-    .insert({ subject: '', html: '', ...value, status: 'draft', created_by: me.email })
+    .insert({ subject: '', html: '', ...value, status: 'draft', created_by: me.email, brand_id: brand.id })
     .select('id')
     .single()
   if (dbError || !data) return Response.json({ error: dbError?.message ?? 'could not create draft' }, { status: 500 })

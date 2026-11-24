@@ -1,4 +1,5 @@
 import { cleanPrefix } from '@/lib/audience'
+import { currentBrand } from '@/lib/brand'
 import { db } from '@/lib/db'
 import { apiRole } from '@/lib/guard'
 
@@ -13,14 +14,15 @@ export async function GET(req: Request) {
   if (q === null) return Response.json({ total: 0, exact: 0, options: [] })
 
   const sb = db()
-  const { count: total } = await sb.from('contacts').select('id', { count: 'exact', head: true })
-  const { data, error } = await sb.rpc('contact_prefixes', { q, len: Math.max(4, q.length + 1) })
+  const brand = await currentBrand()
+  const { count: total } = await sb.from('contacts').select('id', { count: 'exact', head: true }).eq('brand_id', brand.id)
+  const { data, error } = await sb.rpc('contact_prefixes', { q, len: Math.max(4, q.length + 1), brand: brand.id })
   if (error) return Response.json({ error: 'could not load' }, { status: 500 })
   const options = ((data ?? []) as { prefix: string; n: number }[])
     // An address shorter than the prefix length comes back whole; only real "more to come" prefixes are useful.
     .filter((o) => o.prefix.length > q.length && !o.prefix.includes('@'))
     .map((o) => ({ prefix: o.prefix, n: Number(o.n) }))
     .sort((a, b) => a.prefix.localeCompare(b.prefix))
-  const exact = q ? ((await sb.from('contacts').select('id', { count: 'exact', head: true }).like('email', `${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`)).count ?? 0) : (total ?? 0)
+  const exact = q ? ((await sb.from('contacts').select('id', { count: 'exact', head: true }).eq('brand_id', brand.id).like('email', `${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`)).count ?? 0) : (total ?? 0)
   return Response.json({ total: total ?? 0, exact, options })
 }

@@ -1,5 +1,6 @@
 import Link from 'next/link'
 
+import { currentBrand } from '@/lib/brand'
 import { db } from '@/lib/db'
 import { requireRole } from '@/lib/guard'
 import { atLeast } from '@/lib/roles'
@@ -48,12 +49,13 @@ const pct = (n: number, d: number) => (d ? `${Math.round((n / d) * 100)}%` : 'â€
 export default async function Campaigns({ searchParams }: { searchParams: Promise<{ status?: string; q?: string }> }) {
   const me = await requireRole('viewer')
   const { status, q } = await searchParams
-  let query = db().from('campaign_stats').select('*').order('created_at', { ascending: false }).limit(300)
+  const brand = await currentBrand()
+  let query = db().from('campaign_stats').select('*').eq('brand_id', brand.id).order('created_at', { ascending: false }).limit(300)
   if (status) query = query.eq('status', status)
   if (q?.trim()) query = query.ilike('subject', `%${q.trim()}%`)
   const { data } = await query
   const rows = (data ?? []) as Row[]
-  const { data: statusRows } = await db().from('campaigns').select('status')
+  const { data: statusRows } = await db().from('campaigns').select('status').eq('brand_id', brand.id)
   const tally = new Map<string, number>()
   ;(statusRows ?? []).forEach((r: { status: string }) => tally.set(r.status, (tally.get(r.status) ?? 0) + 1))
 

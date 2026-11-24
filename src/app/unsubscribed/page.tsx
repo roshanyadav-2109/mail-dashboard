@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { revalidatePath } from 'next/cache'
 
 import { audit } from '@/lib/audit'
+import { currentBrand } from '@/lib/brand'
 import { db } from '@/lib/db'
 import { requireRole } from '@/lib/guard'
 import { atLeast } from '@/lib/roles'
@@ -27,13 +28,17 @@ async function decide(fd: FormData) {
   const groupId = String(fd.get('group_id') ?? '')
   const campaignId = String(fd.get('campaign_id') ?? '') || null
   if (!email) return
-  if (op === 'keep') await confirmEverywhere(email, actor)
-  else if (op === 'narrow') await narrowToGroups(email, actor)
-  else if (op === 'widen') await widenToEverywhere(email, campaignId, actor)
+  // Every decision applies to the business being worked in only.
+  const brand = await currentBrand()
+  if (op === 'keep') await confirmEverywhere(email, actor, brand.id)
+  else if (op === 'narrow') await narrowToGroups(email, actor, brand.id)
+  else if (op === 'widen') await widenToEverywhere(email, campaignId, actor, brand.id)
   else if (op === 'resub_all') {
-    await db().from('suppressions').delete().eq('email', email).eq('reason', 'unsubscribe')
+    await db().from('suppressions').delete().eq('email', email).eq('reason', 'unsubscribe').eq('scope', brand.id)
     await audit(actor, 'contact.resubscribed', { type: 'contact', id: email }, { scope: 'all', via: 'dashboard' })
   } else if (op === 'resub_group' && groupId) {
+    const { data: own } = await db().from('groups').select('id').eq('id', groupId).eq('brand_id', brand.id).maybeSingle()
+    if (!own) return
     await db().from('group_optouts').delete().eq('email', email).eq('group_id', groupId)
     await audit(actor, 'contact.resubscribed', { type: 'contact', id: email }, { scope: 'group', group: groupId, via: 'dashboard' })
   }
@@ -73,15 +78,19 @@ export default async function Unsubscribed({ searchParams }: { searchParams: Pro
   const canEdit = atLeast(me.role, 'sender')
   const sp = await searchParams
   const sb = db()
+  const brand = await currentBrand()
 
-  const unsub = () => sb.from('suppressions').select('email', { count: 'exact', head: true }).eq('reason', 'unsubscribe')
+  const unsub = () => sb.from('suppressions').select('email', { count: 'exact', head: true }).eq('scope', brand.id).eq('reason', 'unsubscribe')
+  // Opt-outs from this business's groups only.
+  const optouts = (columns: string, opts?: { count: 'exact'; head?: boolean }) =>
+    sb.from('group_optouts').select(columns, opts).eq('groups.brand_id', brand.id)
   const since = new Date(Date.now() - 30 * 86_400_000).toISOString()
   const [{ count: reviewCount }, { count: allCount }, { count: groupCount }, { count: recentAll }, { count: recentGroups }] = await Promise.all([
     unsub().is('reviewed_at', null),
     unsub().not('reviewed_at', 'is', null),
-    sb.from('group_optouts').select('email', { count: 'exact', head: true }),
+    optouts('email, groups!inner(brand_id)', { count: 'exact', head: true }),
     unsub().gte('created_at', since),
-    sb.from('group_optouts').select('email', { count: 'exact', head: true }).gte('created_at', since),
+    optouts('email, groups!inner(brand_id)', { count: 'exact', head: true }).gte('created_at', since),
   ])
 
   // Open on "Needs review" while anything is waiting.
@@ -92,7 +101,7 @@ export default async function Unsubscribed({ searchParams }: { searchParams: Pro
   let rows: (SupRow | GroupRow)[] = []
   let total = 0
   if (view === 'groups') {
-    let query = sb.from('group_optouts').select('email, group_id, created_at, campaign_id, groups(name), campaigns(subject)', { count: 'exact' }).order('created_at', { ascending: false })
+    let query = optouts('email, group_id, created_at, campaign_id, groups!inner(name, brand_id), campaigns(subject)', { count: 'exact' }).order('created_at', { ascending: false })
     if (needle) query = query.ilike('email', `%${needle}%`)
     const { data, count } = await query.range(p * PAGE, p * PAGE + PAGE - 1)
     rows = (data ?? []) as unknown as GroupRow[]
@@ -101,6 +110,7 @@ export default async function Unsubscribed({ searchParams }: { searchParams: Pro
     let query = sb
       .from('suppressions')
       .select('email, detail, created_at, campaign_id, reviewed_by, campaigns(subject)', { count: 'exact' })
+      .eq('scope', brand.id)
       .eq('reason', 'unsubscribe')
       .order('created_at', { ascending: false })
     query = view === 'review' ? query.is('reviewed_at', null) : query.not('reviewed_at', 'is', null)
@@ -110,9 +120,9 @@ export default async function Unsubscribed({ searchParams }: { searchParams: Pro
     total = count ?? 0
   }
 
-  const options: Map<string, UnsubGroup[]> = view === 'groups' ? new Map() : await narrowOptions(rows as SupRow[])
+  const options: Map<string, UnsubGroup[]> = view === 'groups' ? new Map() : await narrowOptions(rows as SupRow[], brand.id)
   const emails = [...new Set(rows.map((r) => r.email))]
-  const { data: contacts } = emails.length ? await sb.from('contacts').select('id, email').in('email', emails) : { data: [] }
+  const { data: contacts } = emails.length ? await sb.from('contacts').select('id, email').eq('brand_id', brand.id).in('email', emails) : { data: [] }
   const contactId = new Map((contacts ?? []).map((c: { id: string; email: string }) => [c.email, c.id]))
 
   const qs = (patch: Record<string, string | undefined>) => {

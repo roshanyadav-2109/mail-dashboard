@@ -1,3 +1,4 @@
+import { currentBrand } from '@/lib/brand'
 import { domainHealth } from '@/lib/domain'
 import { requireRole } from '@/lib/guard'
 
@@ -10,7 +11,8 @@ const LABEL = { ok: 'OK', warn: 'Improve', fail: 'Fix needed', info: 'Info' }
 
 export default async function Domain() {
   await requireRole('sender')
-  const { domain, checks } = await domainHealth()
+  // Checks the sending domain of the business picked in the sidebar.
+  const { domain, checks } = await domainHealth(await currentBrand())
   const problems = checks.filter((c) => c.status === 'fail').length
   const improve = checks.filter((c) => c.status === 'warn').length
 

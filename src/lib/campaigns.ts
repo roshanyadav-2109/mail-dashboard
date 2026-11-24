@@ -23,6 +23,7 @@ export type CampaignRow = {
   approval: { requested_by?: string; requested_at?: string; decided_by?: string; decided_at?: string; decision?: string; note?: string } | null
   created_by: string
   created_at: string
+  brand_id: string
 }
 
 type Result = { ok: true; status: string; recipients: number } | { ok: false; error: string }
@@ -53,7 +54,7 @@ export async function submitCampaign(id: string, me: Me, when: Date | null, mode
   if (errors.length) return { ok: false, error: errors.map((e) => e.message).join(' ') }
   if (when && Number.isNaN(when.getTime())) return { ok: false, error: 'Invalid schedule time' }
 
-  const resolved = await resolveAudience(c.audience)
+  const resolved = await resolveAudience(c.audience, c.brand_id)
   if (!resolved.emails.length) return { ok: false, error: 'No one to send to: every recipient is suppressed or the audience is empty.' }
 
   // Best-time mode: each person with enough history waits for their usual hour (within 24h of the start).
@@ -149,6 +150,7 @@ export async function duplicateCampaign(id: string, me: Me): Promise<string | nu
       event: (c as unknown as { event: unknown }).event ?? null,
       status: 'draft',
       created_by: me.email,
+      brand_id: c.brand_id,
     })
     .select('id')
     .single()

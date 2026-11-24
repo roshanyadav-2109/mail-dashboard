@@ -4,10 +4,6 @@ import { audit } from '@/lib/audit'
 import { db } from '@/lib/db'
 
 export type Settings = {
-  /** Display name in the From header; the address itself is fixed to SES_FROM on unknowniitians.in. */
-  sender_name: string
-  /** Where replies go when a campaign does not set its own. Empty = replies go to the sender address. */
-  reply_to: string
   /** Most emails that may go out in one day (IST), across all campaigns. */
   daily_limit: number
   /** When on, sends larger than approval_threshold wait for a second admin. */
@@ -30,8 +26,6 @@ export type Settings = {
 }
 
 export const DEFAULTS: Settings = {
-  sender_name: 'Unknown IITians',
-  reply_to: '',
   daily_limit: 5000,
   approval_enabled: false,
   approval_threshold: 500,
